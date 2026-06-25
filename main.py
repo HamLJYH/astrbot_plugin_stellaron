@@ -197,12 +197,10 @@ class HonkaiStarRailQuotes(Star):
         character = quote.get("character", "未知角色")
         source = quote.get("source", "")
 
-        result = f"**{character}**"
+        result = "**" + character + "**"
         if source:
-            result += f" · *{source}*"
-        result += f"
-
-{content}"
+            result += " · *" + source + "*"
+        result += "\n\n" + content
         return result
 
     @filter.command_group("崩铁")
@@ -230,8 +228,7 @@ class HonkaiStarRailQuotes(Star):
             source(string): 来源（可选）
         """
         if not content or not content.strip():
-            yield event.plain_result("金句内容不能为空！
-用法: /崩铁 添加 金句内容 角色名 [来源]")
+            yield event.plain_result("金句内容不能为空！\n用法: /崩铁 添加 金句内容 角色名 [来源]")
             return
 
         new_quote = {
@@ -245,15 +242,10 @@ class HonkaiStarRailQuotes(Star):
 
         if self._save_custom_quotes():
             yield event.plain_result(
-                f"金句添加成功！
-
-"
-                f"**{new_quote['character']}**
-"
-                f"{new_quote['content']}
-
-"
-                f"当前共有 {len(self.all_quotes)} 条金句（自定义 {len(self.custom_quotes)} 条）"
+                "金句添加成功！\n\n"
+                "**" + new_quote["character"] + "**\n"
+                + new_quote["content"] + "\n\n"
+                + f"当前共有 {len(self.all_quotes)} 条金句（自定义 {len(self.custom_quotes)} 条）"
             )
         else:
             yield event.plain_result("金句添加失败，请检查文件权限。")
@@ -266,8 +258,7 @@ class HonkaiStarRailQuotes(Star):
             keyword(string): 要删除的金句关键词（必填）
         """
         if not keyword or not keyword.strip():
-            yield event.plain_result("关键词不能为空！
-用法: /崩铁 删除 关键词")
+            yield event.plain_result("关键词不能为空！\n用法: /崩铁 删除 关键词")
             return
 
         keyword = keyword.strip()
@@ -281,17 +272,15 @@ class HonkaiStarRailQuotes(Star):
         deleted_count = original_count - len(self.custom_quotes)
 
         if deleted_count == 0:
-            yield event.plain_result(f"未找到包含「{keyword}」的自定义金句。
-注意：默认金句无法删除。")
+            yield event.plain_result("未找到包含「" + keyword + "」的自定义金句。\n注意：默认金句无法删除。")
             return
 
         self.all_quotes = self.default_quotes + self.custom_quotes
 
         if self._save_custom_quotes():
             yield event.plain_result(
-                f"已删除 {deleted_count} 条包含「{keyword}」的金句。
-"
-                f"当前共有 {len(self.all_quotes)} 条金句（自定义 {len(self.custom_quotes)} 条）"
+                "已删除 " + str(deleted_count) + " 条包含「" + keyword + "」的金句。\n"
+                + f"当前共有 {len(self.all_quotes)} 条金句（自定义 {len(self.custom_quotes)} 条）"
             )
         else:
             yield event.plain_result("删除失败，请检查文件权限。")
@@ -304,8 +293,7 @@ class HonkaiStarRailQuotes(Star):
             page(number): 页码（可选，默认1，每页10条）
         """
         if not self.custom_quotes:
-            yield event.plain_result("暂无自定义金句。
-使用 /崩铁 添加 来添加你的第一条金句吧！")
+            yield event.plain_result("暂无自定义金句。\n使用 /崩铁 添加 来添加你的第一条金句吧！")
             return
 
         per_page = 10
@@ -320,10 +308,8 @@ class HonkaiStarRailQuotes(Star):
         end = start + per_page
         page_quotes = self.custom_quotes[start:end]
 
-        result = f"自定义金句列表（第 {page}/{total_pages} 页，共 {len(self.custom_quotes)} 条）
-"
-        result += "-" * 30 + "
-"
+        result = "自定义金句列表（第 " + str(page) + "/" + str(total_pages) + " 页，共 " + str(len(self.custom_quotes)) + " 条）\n"
+        result += "-" * 30 + "\n"
 
         for i, quote in enumerate(page_quotes, start=start + 1):
             content = quote.get("content", "")
@@ -331,12 +317,10 @@ class HonkaiStarRailQuotes(Star):
             # 截断过长的内容
             if len(content) > 30:
                 content = content[:30] + "..."
-            result += f"{i}. [{character}] {content}
-"
+            result += str(i) + ". [" + character + "] " + content + "\n"
 
         if total_pages > 1:
-            result += f"
-使用 /崩铁 列表 {page + 1 if page < total_pages else 1} 翻页"
+            result += "\n使用 /崩铁 列表 " + str(page + 1 if page < total_pages else 1) + " 翻页"
 
         yield event.plain_result(result)
 
@@ -352,64 +336,58 @@ class HonkaiStarRailQuotes(Star):
         # 按数量排序
         sorted_chars = sorted(char_count.items(), key=lambda x: x[1], reverse=True)[:10]
 
-        result = "崩铁金句统计
-"
-        result += "-" * 30 + "
-"
-        result += f"总金句数: {len(self.all_quotes)}
-"
-        result += f"  - 默认金句: {len(self.default_quotes)}
-"
-        result += f"  - 自定义金句: {len(self.custom_quotes)}
+        result = "崩铁金句统计\n"
+        result += "-" * 30 + "\n"
+        result += "总金句数: " + str(len(self.all_quotes)) + "\n"
+        result += "  - 默认金句: " + str(len(self.default_quotes)) + "\n"
+        result += "  - 自定义金句: " + str(len(self.custom_quotes)) + "\n\n"
 
-"
-
-        result += "金句最多的角色 TOP10:
-"
+        result += "金句最多的角色 TOP10:\n"
         for i, (char, count) in enumerate(sorted_chars, 1):
             bar = "█" * count
-            result += f"{i}. {char}: {count}条 {bar}
-"
+            result += str(i) + ". " + char + ": " + str(count) + "条 " + bar + "\n"
 
         yield event.plain_result(result)
 
     @honkai_group.command("帮助")
     async def help_quotes(self, event: AstrMessageEvent):
         """查看崩铁金句插件帮助信息"""
-        help_text = """崩坏：星穹铁道金句插件
-
-指令列表:
-------------------------------
-/崩铁 金句 - 随机输出一条金句
-/崩铁 添加 <内容> [角色名] [来源] - 添加自定义金句
-/崩铁 删除 <关键词> - 删除包含关键词的自定义金句
-/崩铁 列表 [页码] - 查看自定义金句列表
-/崩铁 统计 - 查看金句统计信息
-/崩铁 帮助 - 显示此帮助信息
-
-使用示例:
-------------------------------
-/崩铁 金句
--> 随机输出一条金句
-
-/崩铁 添加 "规则就是用来打破的" 开拓者
--> 添加一条开拓者的金句
-
-/崩铁 添加 "帮帮我，史瓦罗先生！" 克拉拉 角色语音
--> 添加带来源的金句
-
-/崩铁 删除 史瓦罗
--> 删除所有包含"史瓦罗"的自定义金句
-
-/崩铁 列表 2
--> 查看第2页自定义金句
-
-注意事项:
-------------------------------
-- 默认金句无法删除，只能删除自定义金句
-- 自定义金句保存在插件目录的 custom_quotes.json 中
-- 添加金句时内容必填，角色名和来源可选"""
-
+        help_lines = [
+            "崩坏：星穹铁道金句插件",
+            "",
+            "指令列表:",
+            "------------------------------",
+            "/崩铁 金句 - 随机输出一条金句",
+            "/崩铁 添加 <内容> [角色名] [来源] - 添加自定义金句",
+            "/崩铁 删除 <关键词> - 删除包含关键词的自定义金句",
+            "/崩铁 列表 [页码] - 查看自定义金句列表",
+            "/崩铁 统计 - 查看金句统计信息",
+            "/崩铁 帮助 - 显示此帮助信息",
+            "",
+            "使用示例:",
+            "------------------------------",
+            "/崩铁 金句",
+            "-> 随机输出一条金句",
+            "",
+            "/崩铁 添加 \"规则就是用来打破的\" 开拓者",
+            "-> 添加一条开拓者的金句",
+            "",
+            "/崩铁 添加 \"帮帮我，史瓦罗先生！\" 克拉拉 角色语音",
+            "-> 添加带来源的金句",
+            "",
+            "/崩铁 删除 史瓦罗",
+            "-> 删除所有包含\"史瓦罗\"的自定义金句",
+            "",
+            "/崩铁 列表 2",
+            "-> 查看第2页自定义金句",
+            "",
+            "注意事项:",
+            "------------------------------",
+            "- 默认金句无法删除，只能删除自定义金句",
+            "- 自定义金句保存在插件目录的 custom_quotes.json 中",
+            "- 添加金句时内容必填，角色名和来源可选",
+        ]
+        help_text = "\n".join(help_lines)
         yield event.plain_result(help_text)
 
     async def terminate(self):

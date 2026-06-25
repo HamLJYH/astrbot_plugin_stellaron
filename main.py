@@ -13,7 +13,9 @@ class HonkaiStarRailQuotes(Star):
             # 景元
             {"content": "煌煌威灵，尊吾敕命，斩无赦！", "character": "景元", "source": "角色语音"},
             {"content": "人们会为一子妙手力挽狂澜而喜，却不为大局危倾而忧。", "character": "景元", "source": "剧情台词"},
-            {"content": "就让这一轮月华，照彻万川！", "character": "景元", "source": "角色语音"},
+
+            # 镜流
+            {"content": "就让这一轮月华，照彻万川！", "character": "镜流", "source": "角色语音"},
 
             # 刃
             {"content": "死亡何时而至？我等得有些心焦了。", "character": "刃", "source": "角色语音"},

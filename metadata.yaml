@@ -1,6 +1,6 @@
 name: astrbot_plugin_honkai_quotes
-author: AstrBot Plugin Developer
+author: HamLJYH
 desc: 崩坏：星穹铁道金句插件，随机输出角色经典台词，支持用户自定义添加
 version: v1.0.0
-repo: https://github.com/your-repo/astrbot_plugin_honkai_quotes
+repo: https://github.com/HamLJYH/astrbot_plugin_stellaron.git
 short_desc: 随机输出崩铁金句，支持自定义添加

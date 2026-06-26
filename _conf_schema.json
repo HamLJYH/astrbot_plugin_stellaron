@@ -1,0 +1,14 @@
+{
+  "anti_spam_enabled": {
+    "description": "是否开启防刷屏机制",
+    "type": "bool",
+    "default": true,
+    "hint": "关闭后，用户和群聊可以无限次触发金句"
+  },
+  "daily_limit": {
+    "description": "每日触发上限（次/天）",
+    "type": "int",
+    "default": 50,
+    "hint": "限制每个用户/群聊每天最多触发多少次随机金句"
+  }
+}

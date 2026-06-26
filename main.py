@@ -26,7 +26,6 @@ from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 
-
 # =============================================================================
 # 常量定义
 # =============================================================================
@@ -41,7 +40,6 @@ DEFAULT_USER_COOLDOWN_SECONDS = 10
 DEFAULT_GROUP_DAILY_LIMIT = 50
 
 CUSTOM_QUOTES_FILENAME = "custom_quotes.json"
-
 
 # =============================================================================
 # 工具函数
@@ -83,7 +81,6 @@ def handle_errors(func):
             yield event.plain_result("❌ 操作失败，请联系管理员")
 
     return wrapper
-
 
 # =============================================================================
 # 插件主类
@@ -314,10 +311,10 @@ class StellaronPlugin(Star):
         try:
             with open(self.custom_quotes_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                if isinstance(data, list):
-                    return data
-                logger.warning("custom_quotes.json 格式不正确，应为列表")
-                return []
+            if isinstance(data, list):
+                return data
+            logger.warning("custom_quotes.json 格式不正确，应为列表")
+            return []
         except json.JSONDecodeError as e:
             logger.error(f"解析自定义金句 JSON 失败: {e}")
             return []
@@ -619,7 +616,7 @@ class StellaronPlugin(Star):
 
         yield event.plain_result("\n".join(lines))
 
-    @honkai_group.command("统计")
+        @honkai_group.command("统计")
     @handle_errors
     async def stats_quotes(self, event: AstrMessageEvent) -> AsyncGenerator[Any, None]:
         """查看金句统计信息"""
@@ -635,32 +632,26 @@ class StellaronPlugin(Star):
             key=lambda x: (-x[1], x[0])
         )[:10]
 
+        # 构建横向排列的 TOP10 字符串
+        top10_parts = []
+        for i, (char, count) in enumerate(sorted_chars, 1):
+            top10_parts.append(f"{i}.{char}({count})")
+        top10_str = "  ".join(top10_parts)
+
         lines = [
             "📊 崩铁金句统计",
             "-" * 30,
             f"总金句数: {len(self.all_quotes)}",
-            f"  ├─ 默认金句: {len(self.default_quotes)}",
-            f"  └─ 自定义金句: {len(self.custom_quotes)}",
+            f"  • 默认金句: {len(self.default_quotes)}",
+            f"  • 自定义金句: {len(self.custom_quotes)}",
             "",
             "🏆 金句最多的角色 TOP10:",
+            top10_str,
         ]
 
-        for i, (char, count) in enumerate(sorted_chars, 1):
-            lines.append(f"  {i}. {char}: {count}条")
+        yield event.plain_result("
+".join(lines))
 
-        # 显示防刷屏配置
-        lines.extend([
-            "",
-            "⚙️ 防刷屏配置:",
-            "-" * 30,
-            f"总开关: {'✅ 已开启' if self.anti_spam_enabled else '❌ 已关闭'}",
-            f"  ├─ 用户冷却: {'✅ 已开启' if self.user_cooldown_enabled else '❌ 已关闭'}"
-            f"（{self.user_cooldown_seconds}秒）" if self.user_cooldown_enabled else "",
-            f"  └─ 群聊日限: {'✅ 已开启' if self.group_daily_limit_enabled else '❌ 已关闭'}"
-            f"（{self.group_daily_limit}次/天）" if self.group_daily_limit_enabled else "",
-        ])
-
-        yield event.plain_result("\n".join(lines))
 
     @honkai_group.command("帮助")
     @handle_errors
@@ -682,29 +673,29 @@ class StellaronPlugin(Star):
 
 🔧 指令列表:
 ━━━━━━━━━━━━━━━━━━━━
-/崩铁 金句          - 随机输出一条金句
+/崩铁 金句 - 随机输出一条金句
 /崩铁 添加 <内容> [角色] [来源] - 添加自定义金句
-/崩铁 删除 <关键词>  - 删除包含关键词的自定义金句
-/崩铁 列表 [页码]    - 查看自定义金句列表
-/崩铁 统计           - 查看金句统计信息
-/崩铁 帮助           - 显示此帮助信息
+/崩铁 删除 <关键词> - 删除包含关键词的自定义金句
+/崩铁 列表 [页码] - 查看自定义金句列表
+/崩铁 统计 - 查看金句统计信息
+/崩铁 帮助 - 显示此帮助信息
 
 💡 使用示例:
 ━━━━━━━━━━━━━━━━━━━━
 /崩铁 金句
-  → 随机输出一条金句
+ → 随机输出一条金句
 
 /崩铁 添加 "规则就是用来打破的" 开拓者
-  → 添加一条开拓者的金句
+ → 添加一条开拓者的金句
 
 /崩铁 添加 "帮帮我，史瓦罗先生！" 克拉拉 角色语音
-  → 添加带来源的金句
+ → 添加带来源的金句
 
 /崩铁 删除 史瓦罗
-  → 删除所有包含"史瓦罗"的自定义金句
+ → 删除所有包含"史瓦罗"的自定义金句
 
 /崩铁 列表 2
-  → 查看第2页自定义金句
+ → 查看第2页自定义金句
 
 ⚠️ 注意事项:
 ━━━━━━━━━━━━━━━━━━━━

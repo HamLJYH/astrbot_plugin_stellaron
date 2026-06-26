@@ -57,7 +57,7 @@ class HonkaiStarRailQuotes(Star):
             {"content": "史瓦罗常把人类喜欢无休止的争斗挂在嘴上，但如果只靠退让，难道就能获得和平？", "character": "希儿", "source": "剧情台词"},
             {"content": "万一被卷入了麻烦事，自己的真心如何并不重要，重要的是，如何找到适合自己扮演的角色。", "character": "罗刹", "source": "剧情台词"},
             {"content": "帮帮我，史瓦罗先生！", "character": "克拉拉", "source": "角色语音"},
-            {"content": "愿母神三度为你阖眼，令你的血脉永远鼓动，旅途永远坦然，诡计永不败露。", "character": "黑天鹅", "source": "剧情台词"},
+            {"content": "愿母神三度为你阖眼，令你的血脉永远鼓动，旅途永远坦然，诡计永不败露。", "character": "砂金", "source": "剧情台词"},
             {"content": "是你在偷看我吗？", "character": "黄泉", "source": "角色语音"},
             {"content": "是时候说再见了。", "character": "黄泉", "source": "角色语音"},
             {"content": "邀诸位共赏。", "character": "知更鸟", "source": "角色语音"},

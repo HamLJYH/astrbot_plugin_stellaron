@@ -355,9 +355,7 @@ class StellaronPlugin(Star):
         result = f"**{character}**"
         if source:
             result += f" · *{source}*"
-        result += f"
-
-{content}"
+        result += f"\n{content}"  # ← 修复：\n 用转义，不要真的换行
         return result
 
     def _validate_quote_content(self, content: str) -> Tuple[bool, str]:
@@ -454,10 +452,8 @@ class StellaronPlugin(Star):
 
         if not args_str:
             yield event.plain_result(
-                "金句内容不能为空！
-"
-                "用法: /崩铁 添加 金句内容 [角色名] [来源]
-"
+                "金句内容不能为空！\n"
+                "用法: /崩铁 添加 金句内容 [角色名] [来源]\n"
                 '示例: /崩铁 添加 "规则就是用来打破的" 开拓者'
             )
             return
@@ -515,12 +511,8 @@ class StellaronPlugin(Star):
 
         if self._save_custom_quotes():
             yield event.plain_result(
-                f"金句添加成功！
-
-"
-                f"{self._format_quote(new_quote)}
-
-"
+                f"金句添加成功！\n"  # ← 修复：\n 用转义
+                f"{self._format_quote(new_quote)}\n"
                 f"当前共有 {len(self.all_quotes)} 条金句"
                 f"（自定义 {len(self.custom_quotes)} 条）"
             )
@@ -542,10 +534,8 @@ class StellaronPlugin(Star):
 
         if not keyword:
             yield event.plain_result(
-                "关键词不能为空！
-"
-                "用法: /崩铁 删除 关键词
-"
+                "关键词不能为空！\n"
+                "用法: /崩铁 删除 关键词\n"
                 "示例: /崩铁 删除 史瓦罗"
             )
             return
@@ -566,8 +556,7 @@ class StellaronPlugin(Star):
 
         if deleted_count == 0:
             yield event.plain_result(
-                f"未找到包含「{keyword}」的自定义金句。
-"
+                f"未找到包含「{keyword}」的自定义金句。\n"
                 "注意：默认金句无法删除。"
             )
             return
@@ -576,8 +565,7 @@ class StellaronPlugin(Star):
 
         if self._save_custom_quotes():
             yield event.plain_result(
-                f"已删除 {deleted_count} 条包含「{keyword}」的金句。
-"
+                f"已删除 {deleted_count} 条包含「{keyword}」的金句。\n"
                 f"当前共有 {len(self.all_quotes)} 条金句"
                 f"（自定义 {len(self.custom_quotes)} 条）"
             )
@@ -597,8 +585,7 @@ class StellaronPlugin(Star):
         """
         if not self.custom_quotes:
             yield event.plain_result(
-                "暂无自定义金句。
-"
+                "暂无自定义金句。\n"
                 "使用 /崩铁 添加 来添加你的第一条金句吧！"
             )
             return
@@ -628,11 +615,9 @@ class StellaronPlugin(Star):
 
         if total_pages > 1:
             next_page = page + 1 if page < total_pages else 1
-            lines.append(f"
-使用 /崩铁 列表 {next_page} 翻页")
+            lines.append(f"\n使用 /崩铁 列表 {next_page} 翻页")  # ← 修复：\n 用转义
 
-        yield event.plain_result("
-".join(lines))
+        yield event.plain_result("\n".join(lines))
 
     @honkai_group.command("统计")
     @handle_errors
@@ -675,8 +660,7 @@ class StellaronPlugin(Star):
             f"（{self.group_daily_limit}次/天）" if self.group_daily_limit_enabled else "",
         ])
 
-        yield event.plain_result("
-".join(lines))
+        yield event.plain_result("\n".join(lines))
 
     @honkai_group.command("帮助")
     @handle_errors

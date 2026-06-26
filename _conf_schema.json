@@ -3,12 +3,30 @@
     "description": "是否开启防刷屏机制",
     "type": "bool",
     "default": true,
-    "hint": "关闭后，用户和群聊可以无限次触发金句"
+    "hint": "总开关，关闭后所有防刷屏限制失效"
   },
-  "daily_limit": {
-    "description": "每日触发上限（次/天）",
+  "user_cooldown_enabled": {
+    "description": "用户冷却机制",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后，同一用户在指定时间内只能触发一次金句"
+  },
+  "user_cooldown_seconds": {
+    "description": "用户冷却时间（秒）",
+    "type": "int",
+    "default": 10,
+    "hint": "用户触发金句后，需要等待多少秒才能再次触发"
+  },
+  "group_daily_limit_enabled": {
+    "description": "群聊每日限制",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后，限制每个群聊每天最多触发多少次金句"
+  },
+  "group_daily_limit": {
+    "description": "群聊每日上限（次/天）",
     "type": "int",
     "default": 50,
-    "hint": "限制每个用户/群聊每天最多触发多少次随机金句"
+    "hint": "每个群聊每天最多触发多少次随机金句"
   }
 }

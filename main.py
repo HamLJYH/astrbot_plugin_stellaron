@@ -6,20 +6,32 @@ import json
 import os
 import time
 
-@register("astrbot_plugin_honkai_quotes", "HamLJYH", "崩坏星穹铁道金句插件", "1.1.0", "https://github.com/HamLJYH/astrbot_plugin_stellar")
+@register("astrbot_plugin_honkai_quotes", "HamLJYH", "崩坏星穹铁道金句插件", "1.2.0", "https://github.com/HamLJYH/astrbot_plugin_stellar")
 class HonkaiStarRailQuotes(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
 
         # 读取配置（AstrBotConfig 继承自 Dict）
         self.config = config
-        self.anti_spam_enabled = self.config.get("anti_spam_enabled", True)
-        self.daily_limit = self.config.get("daily_limit", 50)
 
-        # 用户防刷屏记录：{user_id: {date_str: count}}
-        self.user_daily_usage = {}
-        # 群聊防刷屏记录：{group_id: {date_str: count}}
-        self.group_daily_usage = {}
+        # 总开关
+        self.anti_spam_enabled = self.config.get("anti_spam_enabled", True)
+
+        # 用户冷却配置
+        self.user_cooldown_enabled = self.config.get("user_cooldown_enabled", True)
+        self.user_cooldown_seconds = self.config.get("user_cooldown_seconds", 10)
+
+        # 群聊日限配置
+        self.group_daily_limit_enabled = self.config.get("group_daily_limit_enabled", True)
+        self.group_daily_limit = self.config.get("group_daily_limit", 50)
+
+        # 用户冷却记录：{user_id: last_trigger_timestamp}
+        # 只保留最近 user_cooldown_seconds 内的记录，超时自动清理
+        self.user_cooldown = {}
+
+        # 群聊每日触发记录：{group_id: {"count": int, "date": str}}
+        # 只保留当天的记录，跨天自动清理
+        self.group_daily_count = {}
 
         # 默认金句库
         self.default_quotes = [
@@ -52,7 +64,7 @@ class HonkaiStarRailQuotes(Star):
             {"content": "对…对不起……", "character": "丹恒", "source": "剧情台词"},
             {"content": "一想到工作，我就浑身头疼……", "character": "银狼", "source": "角色语音"},
             {"content": "愿，此行，终抵群星！", "character": "星期日", "source": "剧情台词"},
-            {"content": "我来巡猎，我来追索，我来猎杀。我任风暴席卷星穹，箭无虚发，斩尽孽物无遗。一切献给——琥珀王。", "character": "飞霄", "source": "角色语音"},
+            {"content": "我将寻征追猎", "character": "飞霄", "source": "角色语音"},
             {"content": "星穹列车正在向外…奔跑…可恶的星穹列车！不许发车！", "character": "斯科特", "source": "剧情台词"},
             {"content": "我来抵押，我来典当，我来清算。我令价值流通不息，以物易物，权衡利弊而后行。一切献给——琥珀王。", "character": "翡翠", "source": "角色语音"},
             {"content": "我来评估，我来核算，我来追偿。我令账目分毫不差，锱铢必较，追索债务于星海。一切献给——琥珀王。", "character": "托帕", "source": "角色语音"},
@@ -93,57 +105,79 @@ class HonkaiStarRailQuotes(Star):
         return time.strftime("%Y-%m-%d", time.localtime())
 
     def _clean_expired_records(self):
-        """清理过期的记录（保留最近一天）"""
-        today = self._get_today_str()
+        """清理过期记录，防止内存泄漏
 
-        # 清理用户记录
-        expired_users = [uid for uid, data in self.user_daily_usage.items() if today not in data]
+        - 用户冷却记录：只保留未超时的（当前时间 - 记录时间 < user_cooldown_seconds）
+        - 群聊日限记录：只保留当天的
+        """
+        current_time = time.time()
+        expire_time = current_time - self.user_cooldown_seconds
+
+        # 清理用户冷却记录（删除超时的）
+        expired_users = [
+            uid for uid, t in self.user_cooldown.items() 
+            if t < expire_time
+        ]
         for uid in expired_users:
-            del self.user_daily_usage[uid]
+            del self.user_cooldown[uid]
 
-        # 清理群聊记录
-        expired_groups = [gid for gid, data in self.group_daily_usage.items() if today not in data]
+        # 清理群聊计数记录（非今天的）
+        today = self._get_today_str()
+        expired_groups = [
+            gid for gid, data in self.group_daily_count.items() 
+            if data.get("date") != today
+        ]
         for gid in expired_groups:
-            del self.group_daily_usage[gid]
+            del self.group_daily_count[gid]
 
-    def _check_anti_spam(self, event: AstrMessageEvent) -> tuple:
-        """检查防刷屏限制
+    def _check_user_cooldown(self, user_id: str) -> tuple:
+        """检查用户冷却机制
 
         Returns:
             (bool, str): (是否允许触发, 提示信息)
         """
-        if not self.anti_spam_enabled:
+        if not self.anti_spam_enabled or not self.user_cooldown_enabled:
+            return True, ""
+
+        self._clean_expired_records()
+
+        current_time = time.time()
+        last_time = self.user_cooldown.get(user_id, 0)
+
+        if current_time - last_time < self.user_cooldown_seconds:
+            remaining = int(self.user_cooldown_seconds - (current_time - last_time))
+            return False, f"触发太快了啦！请 {remaining} 秒后再试~"
+
+        self.user_cooldown[user_id] = current_time
+        return True, ""
+
+    def _check_group_limit(self, group_id: str) -> tuple:
+        """检查群聊每日触发上限
+
+        Returns:
+            (bool, str): (是否允许触发, 提示信息)
+        """
+        if not self.anti_spam_enabled or not self.group_daily_limit_enabled:
             return True, ""
 
         self._clean_expired_records()
 
         today = self._get_today_str()
-        sender_id = str(event.get_sender_id())
-        group_id = str(event.get_group_id()) if event.get_group_id() else None
 
-        # 私聊场景：检查用户个人限制
-        if not group_id:
-            if sender_id not in self.user_daily_usage:
-                self.user_daily_usage[sender_id] = {}
-            if today not in self.user_daily_usage[sender_id]:
-                self.user_daily_usage[sender_id][today] = 0
+        if group_id not in self.group_daily_count:
+            self.group_daily_count[group_id] = {"count": 0, "date": today}
 
-            if self.user_daily_usage[sender_id][today] >= self.daily_limit:
-                return False, f"今日金句次数已用完（{self.daily_limit}/{self.daily_limit}），请明天再来吧~"
+        group_data = self.group_daily_count[group_id]
 
-            self.user_daily_usage[sender_id][today] += 1
-            return True, ""
+        # 如果日期不是今天，重置计数
+        if group_data.get("date") != today:
+            group_data = {"count": 0, "date": today}
+            self.group_daily_count[group_id] = group_data
 
-        # 群聊场景：检查群聊限制
-        if group_id not in self.group_daily_usage:
-            self.group_daily_usage[group_id] = {}
-        if today not in self.group_daily_usage[group_id]:
-            self.group_daily_usage[group_id][today] = 0
+        if group_data["count"] >= self.group_daily_limit:
+            return False, f"本群今天的金句次数已经用完啦！明天再来吧~（上限: {self.group_daily_limit}次/天）"
 
-        if self.group_daily_usage[group_id][today] >= self.daily_limit:
-            return False, f"本群今日金句次数已用完（{self.daily_limit}/{self.daily_limit}），请明天再来吧~"
-
-        self.group_daily_usage[group_id][today] += 1
+        group_data["count"] += 1
         return True, ""
 
     def _load_custom_quotes(self):
@@ -191,11 +225,21 @@ class HonkaiStarRailQuotes(Star):
             yield event.plain_result("暂无金句，请先使用 /崩铁 添加 添加一些金句吧！")
             return
 
-        # 防刷屏检查
-        allowed, msg = self._check_anti_spam(event)
+        user_id = str(event.get_sender_id())
+        group_id = str(event.get_group_id()) if event.get_group_id() else None
+
+        # 用户冷却检查（私聊和群聊都生效）
+        allowed, msg = self._check_user_cooldown(user_id)
         if not allowed:
             yield event.plain_result(msg)
             return
+
+        # 群聊每日限制检查（仅群聊生效）
+        if group_id:
+            allowed, msg = self._check_group_limit(group_id)
+            if not allowed:
+                yield event.plain_result(msg)
+                return
 
         quote = random.choice(self.all_quotes)
         yield event.plain_result(self._format_quote(quote))
@@ -364,8 +408,15 @@ class HonkaiStarRailQuotes(Star):
         # 显示防刷屏配置
         result += chr(10) + "防刷屏配置:" + chr(10)
         result += "-" * 30 + chr(10)
-        result += "状态: " + ("已开启" if self.anti_spam_enabled else "已关闭") + chr(10)
-        result += "每日限制: " + str(self.daily_limit) + " 次" + chr(10)
+        result += "总开关: " + ("已开启" if self.anti_spam_enabled else "已关闭") + chr(10)
+        result += "  用户冷却: " + ("已开启" if self.user_cooldown_enabled else "已关闭")
+        if self.user_cooldown_enabled:
+            result += "（" + str(self.user_cooldown_seconds) + "秒）"
+        result += chr(10)
+        result += "  群聊日限: " + ("已开启" if self.group_daily_limit_enabled else "已关闭")
+        if self.group_daily_limit_enabled:
+            result += "（" + str(self.group_daily_limit) + "次/天）"
+        result += chr(10)
 
         yield event.plain_result(result)
 
@@ -374,13 +425,18 @@ class HonkaiStarRailQuotes(Star):
         """查看崩铁金句插件帮助信息"""
         # 配置状态
         spam_status = "已开启" if self.anti_spam_enabled else "已关闭"
-        limit = f"{self.daily_limit}次/天" if self.anti_spam_enabled else "N/A"
+        user_cooldown_status = "已开启" if self.user_cooldown_enabled else "已关闭"
+        user_cooldown_time = f"{self.user_cooldown_seconds}秒" if self.user_cooldown_enabled else "N/A"
+        group_limit_status = "已开启" if self.group_daily_limit_enabled else "已关闭"
+        group_limit = f"{self.group_daily_limit}次/天" if self.group_daily_limit_enabled else "N/A"
 
         help_lines = [
             "崩坏：星穹铁道金句插件",
             "",
             "配置信息:",
-            "  防刷屏: " + spam_status + "（上限: " + limit + "）",
+            "  总开关: " + spam_status,
+            "  用户冷却: " + user_cooldown_status + "（间隔: " + user_cooldown_time + "）",
+            "  群聊日限: " + group_limit_status + "（上限: " + group_limit + "）",
             "",
             "指令列表:",
             "------------------------------",

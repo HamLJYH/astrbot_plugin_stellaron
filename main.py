@@ -616,7 +616,7 @@ class StellaronPlugin(Star):
 
         yield event.plain_result("\n".join(lines))
 
-        @honkai_group.command("统计")
+    @honkai_group.command("统计")
     @handle_errors
     async def stats_quotes(self, event: AstrMessageEvent) -> AsyncGenerator[Any, None]:
         """查看金句统计信息"""
@@ -649,8 +649,7 @@ class StellaronPlugin(Star):
             top10_str,
         ]
 
-        yield event.plain_result("
-".join(lines))
+        yield event.plain_result("\n".join(lines))
 
 
     @honkai_group.command("帮助")

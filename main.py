@@ -1,13 +1,104 @@
-from astrbot.api.event import filter, AstrMessageEvent
-from astrbot.api.star import Context, Star, register
-from astrbot.api import logger, AstrBotConfig
-import random
+"""
+AstrBot 崩坏：星穹铁道金句插件 v1.2.0
+
+功能描述：
+- 随机输出《崩坏：星穹铁道》角色经典台词/金句
+- 支持用户自定义添加、删除、列表查看金句
+- 支持防刷屏机制（用户冷却、群聊日限）
+- 支持统计分析
+
+作者: HamLJYH
+版本: 1.2.0
+日期: 2026-06-26
+"""
+
+# 标准库
+import asyncio
+import functools
 import json
 import os
+import random
 import time
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
-@register("astrbot_plugin_honkai_quotes", "HamLJYH", "崩坏星穹铁道金句插件", "1.2.0", "https://github.com/HamLJYH/astrbot_plugin_stellar")
-class HonkaiStarRailQuotes(Star):
+# 第三方库
+from astrbot.api import AstrBotConfig, logger
+from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.star import Context, Star, register
+
+
+# =============================================================================
+# 常量定义
+# =============================================================================
+
+MAX_QUOTE_LENGTH = 500
+MAX_CHARACTER_LENGTH = 50
+MAX_SOURCE_LENGTH = 50
+MAX_KEYWORD_LENGTH = 100
+
+DEFAULT_QUOTES_PER_PAGE = 10
+DEFAULT_USER_COOLDOWN_SECONDS = 10
+DEFAULT_GROUP_DAILY_LIMIT = 50
+
+CUSTOM_QUOTES_FILENAME = "custom_quotes.json"
+
+
+# =============================================================================
+# 工具函数
+# =============================================================================
+
+def handle_errors(func):
+    """统一错误处理装饰器
+
+    捕获并处理函数执行过程中的各种异常，向用户返回友好的错误提示。
+    """
+    @functools.wraps(func)
+    async def wrapper(
+        self,
+        event: AstrMessageEvent,
+        *args: Any,
+        **kwargs: Any
+    ) -> AsyncGenerator[Any, None]:
+        try:
+            async for result in func(self, event, *args, **kwargs):
+                yield result
+        except PermissionError as e:
+            logger.error(f"[{func.__name__}] 权限不足: {e}", exc_info=True)
+            yield event.plain_result("❌ 权限不足，请检查文件权限")
+        except (IOError, OSError) as e:
+            logger.error(f"[{func.__name__}] 文件操作失败: {e}", exc_info=True)
+            yield event.plain_result("❌ 文件操作失败，请检查文件是否存在")
+        except asyncio.TimeoutError as e:
+            logger.error(f"[{func.__name__}] 操作超时: {e}", exc_info=True)
+            yield event.plain_result("❌ 操作超时，请稍后重试")
+        except ValueError as e:
+            logger.warning(f"[{func.__name__}] 参数错误: {e}")
+            yield event.plain_result(f"❌ 参数错误: {str(e)}")
+        except Exception as e:
+            error_type = type(e).__name__
+            logger.error(
+                f"[{func.__name__}] 执行失败 [{error_type}]: {e}",
+                exc_info=True
+            )
+            yield event.plain_result("❌ 操作失败，请联系管理员")
+
+    return wrapper
+
+
+# =============================================================================
+# 插件主类
+# =============================================================================
+
+@register(
+    "astrbot_plugin_stellaron",
+    "HamLJYH",
+    "崩坏：星穹铁道金句插件",
+    "1.2.0",
+    "https://github.com/HamLJYH/astrbot_plugin_stellaron"
+)
+class StellaronPlugin(Star):
+    """崩坏：星穹铁道金句插件主类"""
+
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
 
@@ -15,26 +106,56 @@ class HonkaiStarRailQuotes(Star):
         self.config = config
 
         # 总开关
-        self.anti_spam_enabled = self.config.get("anti_spam_enabled", True)
+        self.anti_spam_enabled: bool = self.config.get("anti_spam_enabled", True)
 
         # 用户冷却配置
-        self.user_cooldown_enabled = self.config.get("user_cooldown_enabled", True)
-        self.user_cooldown_seconds = self.config.get("user_cooldown_seconds", 10)
+        self.user_cooldown_enabled: bool = self.config.get(
+            "user_cooldown_enabled", True
+        )
+        self.user_cooldown_seconds: int = self.config.get(
+            "user_cooldown_seconds", DEFAULT_USER_COOLDOWN_SECONDS
+        )
 
         # 群聊日限配置
-        self.group_daily_limit_enabled = self.config.get("group_daily_limit_enabled", True)
-        self.group_daily_limit = self.config.get("group_daily_limit", 50)
+        self.group_daily_limit_enabled: bool = self.config.get(
+            "group_daily_limit_enabled", True
+        )
+        self.group_daily_limit: int = self.config.get(
+            "group_daily_limit", DEFAULT_GROUP_DAILY_LIMIT
+        )
 
         # 用户冷却记录：{user_id: last_trigger_timestamp}
         # 只保留最近 user_cooldown_seconds 内的记录，超时自动清理
-        self.user_cooldown = {}
+        self.user_cooldown: Dict[str, float] = {}
+        self._cooldown_lock = asyncio.Lock()
 
         # 群聊每日触发记录：{group_id: {"count": int, "date": str}}
         # 只保留当天的记录，跨天自动清理
-        self.group_daily_count = {}
+        self.group_daily_count: Dict[str, Dict[str, Any]] = {}
+        self._group_lock = asyncio.Lock()
 
         # 默认金句库
-        self.default_quotes = [
+        self.default_quotes: List[Dict[str, str]] = self._load_default_quotes()
+
+        # 用户自定义金句文件路径
+        self.custom_quotes_file: str = os.path.join(
+            os.path.dirname(__file__), CUSTOM_QUOTES_FILENAME
+        )
+        self.custom_quotes: List[Dict[str, str]] = self._load_custom_quotes()
+
+        # 合并默认和用户自定义
+        self.all_quotes: List[Dict[str, str]] = (
+            self.default_quotes + self.custom_quotes
+        )
+
+        logger.info(
+            f"崩铁金句插件加载完成，共 {len(self.all_quotes)} 条金句"
+            f"（默认 {len(self.default_quotes)} 条，自定义 {len(self.custom_quotes)} 条）"
+        )
+
+    def _load_default_quotes(self) -> List[Dict[str, str]]:
+        """加载内置默认金句"""
+        return [
             {"content": "煌煌威灵，尊吾敕命，斩无赦！", "character": "景元", "source": "角色语音"},
             {"content": "人们会为一子妙手力挽狂澜而喜，却不为大局危倾而忧。", "character": "景元", "source": "剧情台词"},
             {"content": "就让这一轮月华，照彻万川！", "character": "镜流", "source": "角色语音"},
@@ -90,19 +211,11 @@ class HonkaiStarRailQuotes(Star):
             {"content": "天才的头脑，不是用来理解庸人的。", "character": "大黑塔", "source": "角色语音"},
         ]
 
-        # 用户自定义金句文件路径
-        self.custom_quotes_file = os.path.join(os.path.dirname(__file__), "custom_quotes.json")
-        self.custom_quotes = self._load_custom_quotes()
-
-        # 合并默认和用户自定义
-        self.all_quotes = self.default_quotes + self.custom_quotes
-        logger.info(f"崩铁金句插件加载完成，共 {len(self.all_quotes)} 条金句（默认 {len(self.default_quotes)} 条，自定义 {len(self.custom_quotes)} 条）")
-
     def _get_today_str(self) -> str:
         """获取今天的日期字符串"""
         return time.strftime("%Y-%m-%d", time.localtime())
 
-    def _clean_expired_records(self):
+    async def _clean_expired_records(self) -> None:
         """清理过期记录，防止内存泄漏
 
         - 用户冷却记录：只保留未超时的（当前时间 - 记录时间 < user_cooldown_seconds）
@@ -110,26 +223,29 @@ class HonkaiStarRailQuotes(Star):
         """
         current_time = time.time()
         expire_time = current_time - self.user_cooldown_seconds
-
-        # 清理用户冷却记录（删除超时的）
-        expired_users = [
-            uid for uid, t in self.user_cooldown.items() 
-            if t < expire_time
-        ]
-        for uid in expired_users:
-            del self.user_cooldown[uid]
-
-        # 清理群聊计数记录（非今天的）
         today = self._get_today_str()
-        expired_groups = [
-            gid for gid, data in self.group_daily_count.items() 
-            if data.get("date") != today
-        ]
-        for gid in expired_groups:
-            del self.group_daily_count[gid]
 
-    def _check_user_cooldown(self, user_id: str) -> tuple:
+        async with self._cooldown_lock:
+            expired_users = [
+                uid for uid, t in self.user_cooldown.items()
+                if t < expire_time
+            ]
+            for uid in expired_users:
+                del self.user_cooldown[uid]
+
+        async with self._group_lock:
+            expired_groups = [
+                gid for gid, data in self.group_daily_count.items()
+                if data.get("date") != today
+            ]
+            for gid in expired_groups:
+                del self.group_daily_count[gid]
+
+    async def _check_user_cooldown(self, user_id: str) -> Tuple[bool, str]:
         """检查用户冷却机制
+
+        Args:
+            user_id: 用户ID
 
         Returns:
             (bool, str): (是否允许触发, 提示信息)
@@ -137,20 +253,25 @@ class HonkaiStarRailQuotes(Star):
         if not self.anti_spam_enabled or not self.user_cooldown_enabled:
             return True, ""
 
-        self._clean_expired_records()
-
+        await self._clean_expired_records()
         current_time = time.time()
-        last_time = self.user_cooldown.get(user_id, 0)
 
-        if current_time - last_time < self.user_cooldown_seconds:
-            remaining = int(self.user_cooldown_seconds - (current_time - last_time))
-            return False, f"触发太快了啦！请 {remaining} 秒后再试~"
+        async with self._cooldown_lock:
+            last_time = self.user_cooldown.get(user_id, 0)
+            if current_time - last_time < self.user_cooldown_seconds:
+                remaining = int(
+                    self.user_cooldown_seconds - (current_time - last_time)
+                )
+                return False, f"触发太快了啦！请 {remaining} 秒后再试~"
 
-        self.user_cooldown[user_id] = current_time
-        return True, ""
+            self.user_cooldown[user_id] = current_time
+            return True, ""
 
-    def _check_group_limit(self, group_id: str) -> tuple:
+    async def _check_group_limit(self, group_id: str) -> Tuple[bool, str]:
         """检查群聊每日触发上限
+
+        Args:
+            group_id: 群聊ID
 
         Returns:
             (bool, str): (是否允许触发, 提示信息)
@@ -158,39 +279,58 @@ class HonkaiStarRailQuotes(Star):
         if not self.anti_spam_enabled or not self.group_daily_limit_enabled:
             return True, ""
 
-        self._clean_expired_records()
-
+        await self._clean_expired_records()
         today = self._get_today_str()
 
-        if group_id not in self.group_daily_count:
-            self.group_daily_count[group_id] = {"count": 0, "date": today}
+        async with self._group_lock:
+            if group_id not in self.group_daily_count:
+                self.group_daily_count[group_id] = {"count": 0, "date": today}
 
-        group_data = self.group_daily_count[group_id]
+            group_data = self.group_daily_count[group_id]
 
-        # 如果日期不是今天，重置计数
-        if group_data.get("date") != today:
-            group_data = {"count": 0, "date": today}
-            self.group_daily_count[group_id] = group_data
+            # 如果日期不是今天，重置计数
+            if group_data.get("date") != today:
+                group_data = {"count": 0, "date": today}
+                self.group_daily_count[group_id] = group_data
 
-        if group_data["count"] >= self.group_daily_limit:
-            return False, f"本群今天的金句次数已经用完啦！明天再来吧~（上限: {self.group_daily_limit}次/天）"
+            if group_data["count"] >= self.group_daily_limit:
+                return False, (
+                    f"本群今天的金句次数已经用完啦！明天再来吧~"
+                    f"（上限: {self.group_daily_limit}次/天）"
+                )
 
-        group_data["count"] += 1
-        return True, ""
+            group_data["count"] += 1
+            return True, ""
 
-    def _load_custom_quotes(self):
-        """加载用户自定义金句"""
-        if os.path.exists(self.custom_quotes_file):
-            try:
-                with open(self.custom_quotes_file, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception as e:
-                logger.error(f"加载自定义金句失败: {e}")
+    def _load_custom_quotes(self) -> List[Dict[str, str]]:
+        """加载用户自定义金句
+
+        Returns:
+            自定义金句列表
+        """
+        if not os.path.exists(self.custom_quotes_file):
+            return []
+
+        try:
+            with open(self.custom_quotes_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return data
+                logger.warning("custom_quotes.json 格式不正确，应为列表")
                 return []
-        return []
+        except json.JSONDecodeError as e:
+            logger.error(f"解析自定义金句 JSON 失败: {e}")
+            return []
+        except Exception as e:
+            logger.error(f"加载自定义金句失败: {e}")
+            return []
 
-    def _save_custom_quotes(self):
-        """保存用户自定义金句"""
+    def _save_custom_quotes(self) -> bool:
+        """保存用户自定义金句
+
+        Returns:
+            是否保存成功
+        """
         try:
             with open(self.custom_quotes_file, "w", encoding="utf-8") as f:
                 json.dump(self.custom_quotes, f, ensure_ascii=False, indent=2)
@@ -199,42 +339,99 @@ class HonkaiStarRailQuotes(Star):
             logger.error(f"保存自定义金句失败: {e}")
             return False
 
-    def _format_quote(self, quote):
-        """格式化金句输出"""
+    def _format_quote(self, quote: Dict[str, str]) -> str:
+        """格式化金句输出
+
+        Args:
+            quote: 金句字典，包含 content, character, source
+
+        Returns:
+            格式化后的字符串
+        """
         content = quote.get("content", "")
         character = quote.get("character", "未知角色")
         source = quote.get("source", "")
 
-        result = "**" + character + "**"
+        result = f"**{character}**"
         if source:
-            result += " · *" + source + "*"
-        result += "\n\n" + content
+            result += f" · *{source}*"
+        result += f"
+
+{content}"
         return result
+
+    def _validate_quote_content(self, content: str) -> Tuple[bool, str]:
+        """验证金句内容
+
+        Args:
+            content: 金句内容
+
+        Returns:
+            (bool, str): (是否有效, 错误信息)
+        """
+        if not content or not content.strip():
+            return False, "金句内容不能为空"
+        if len(content) > MAX_QUOTE_LENGTH:
+            return False, f"金句内容过长（最大 {MAX_QUOTE_LENGTH} 字符）"
+        return True, ""
+
+    def _validate_character(self, character: str) -> Tuple[bool, str]:
+        """验证角色名
+
+        Args:
+            character: 角色名
+
+        Returns:
+            (bool, str): (是否有效, 错误信息)
+        """
+        if len(character) > MAX_CHARACTER_LENGTH:
+            return False, f"角色名过长（最大 {MAX_CHARACTER_LENGTH} 字符）"
+        return True, ""
+
+    def _validate_source(self, source: str) -> Tuple[bool, str]:
+        """验证来源
+
+        Args:
+            source: 来源
+
+        Returns:
+            (bool, str): (是否有效, 错误信息)
+        """
+        if len(source) > MAX_SOURCE_LENGTH:
+            return False, f"来源过长（最大 {MAX_SOURCE_LENGTH} 字符）"
+        return True, ""
+
+    # =========================================================================
+    # 指令组定义
+    # =========================================================================
 
     @filter.command_group("崩铁")
     def honkai_group(self):
-        """崩坏：星穹铁道金句插件"""
+        """崩坏：星穹铁道金句插件指令组"""
         pass
 
     @honkai_group.command("金句")
-    async def honkai_quote(self, event: AstrMessageEvent):
+    @handle_errors
+    async def honkai_quote(self, event: AstrMessageEvent) -> AsyncGenerator[Any, None]:
         """随机输出一条崩坏星穹铁道的金句"""
         if not self.all_quotes:
-            yield event.plain_result("暂无金句，请先使用 /崩铁 添加 添加一些金句吧！")
+            yield event.plain_result(
+                "暂无金句，请先使用 /崩铁 添加 添加一些金句吧！"
+            )
             return
 
         user_id = str(event.get_sender_id())
         group_id = str(event.get_group_id()) if event.get_group_id() else None
 
         # 用户冷却检查（私聊和群聊都生效）
-        allowed, msg = self._check_user_cooldown(user_id)
+        allowed, msg = await self._check_user_cooldown(user_id)
         if not allowed:
             yield event.plain_result(msg)
             return
 
         # 群聊每日限制检查（仅群聊生效）
         if group_id:
-            allowed, msg = self._check_group_limit(group_id)
+            allowed, msg = await self._check_group_limit(group_id)
             if not allowed:
                 yield event.plain_result(msg)
                 return
@@ -243,35 +440,44 @@ class HonkaiStarRailQuotes(Star):
         yield event.plain_result(self._format_quote(quote))
 
     @honkai_group.command("添加")
-    async def add_quote(self, event: AstrMessageEvent):
-        """添加一条自定义金句。用法: /崩铁 添加 金句内容 [角色名] [来源]"""
+    @handle_errors
+    async def add_quote(self, event: AstrMessageEvent) -> AsyncGenerator[Any, None]:
+        """添加一条自定义金句
+
+        用法: /崩铁 添加 金句内容 [角色名] [来源]
+        示例: /崩铁 添加 "规则就是用来打破的" 开拓者
+        """
         # 从消息文本解析参数
         message = event.message_str
-        if message.startswith("/崩铁 添加"):
-            args_str = message[len("/崩铁 添加"):].strip()
-        else:
-            args_str = message[len("崩铁 添加"):].strip()
+        prefix = "/崩铁 添加" if message.startswith("/崩铁 添加") else "崩铁 添加"
+        args_str = message[len(prefix):].strip()
 
-        if not args_str or not args_str.strip():
+        if not args_str:
             yield event.plain_result(
-                "金句内容不能为空！" + chr(10) +
-                "用法: /崩铁 添加 金句内容 [角色名] [来源]" + chr(10) +
-                "示例: /崩铁 添加 \"规则就是用来打破的\" 开拓者"
+                "金句内容不能为空！
+"
+                "用法: /崩铁 添加 金句内容 [角色名] [来源]
+"
+                '示例: /崩铁 添加 "规则就是用来打破的" 开拓者'
             )
             return
 
         # 解析参数：支持引号包裹的内容
+        new_content = ""
+        new_character = "未知角色"
+        new_source = ""
+
         if args_str.startswith('"') or args_str.startswith("'"):
             quote_char = args_str[0]
             end_idx = args_str.find(quote_char, 1)
             if end_idx != -1:
                 new_content = args_str[1:end_idx].strip()
-                remaining = args_str[end_idx+1:].strip()
-                # 解析剩余部分：角色名和来源
+                remaining = args_str[end_idx + 1:].strip()
                 parts = remaining.split(" ", 1)
                 new_character = parts[0].strip() if parts[0].strip() else "未知角色"
                 new_source = parts[1].strip() if len(parts) > 1 else ""
             else:
+                # 引号未闭合，按空格分割
                 parts = args_str.split(" ", 2)
                 new_content = parts[0].strip().strip('"').strip("'")
                 new_character = parts[1].strip() if len(parts) > 1 else "未知角色"
@@ -282,8 +488,20 @@ class HonkaiStarRailQuotes(Star):
             new_character = parts[1].strip() if len(parts) > 1 else "未知角色"
             new_source = parts[2].strip() if len(parts) > 2 else ""
 
-        if not new_content:
-            yield event.plain_result("金句内容不能为空！")
+        # 验证输入
+        valid, err_msg = self._validate_quote_content(new_content)
+        if not valid:
+            yield event.plain_result(f"❌ {err_msg}")
+            return
+
+        valid, err_msg = self._validate_character(new_character)
+        if not valid:
+            yield event.plain_result(f"❌ {err_msg}")
+            return
+
+        valid, err_msg = self._validate_source(new_source)
+        if not valid:
+            yield event.plain_result(f"❌ {err_msg}")
             return
 
         new_quote = {
@@ -297,76 +515,108 @@ class HonkaiStarRailQuotes(Star):
 
         if self._save_custom_quotes():
             yield event.plain_result(
-                "金句添加成功！" + chr(10) + chr(10) +
-                self._format_quote(new_quote) + chr(10) + chr(10) +
-                f"当前共有 {len(self.all_quotes)} 条金句（自定义 {len(self.custom_quotes)} 条）"
+                f"金句添加成功！
+
+"
+                f"{self._format_quote(new_quote)}
+
+"
+                f"当前共有 {len(self.all_quotes)} 条金句"
+                f"（自定义 {len(self.custom_quotes)} 条）"
             )
         else:
-            yield event.plain_result("金句添加失败，请检查文件权限。")
+            yield event.plain_result("❌ 金句添加失败，请检查文件权限。")
 
     @honkai_group.command("删除")
-    async def delete_quote(self, event: AstrMessageEvent):
-        """删除包含指定关键词的自定义金句。用法: /崩铁 删除 关键词"""
+    @handle_errors
+    async def delete_quote(self, event: AstrMessageEvent) -> AsyncGenerator[Any, None]:
+        """删除包含指定关键词的自定义金句
+
+        用法: /崩铁 删除 关键词
+        示例: /崩铁 删除 史瓦罗
+        """
         # 从消息文本解析参数
         message = event.message_str
-        if message.startswith("/崩铁 删除"):
-            keyword = message[len("/崩铁 删除"):].strip()
-        else:
-            keyword = message[len("崩铁 删除"):].strip()
+        prefix = "/崩铁 删除" if message.startswith("/崩铁 删除") else "崩铁 删除"
+        keyword = message[len(prefix):].strip()
 
-        if not keyword or not keyword.strip():
+        if not keyword:
             yield event.plain_result(
-                "关键词不能为空！" + chr(10) +
-                "用法: /崩铁 删除 关键词" + chr(10) +
+                "关键词不能为空！
+"
+                "用法: /崩铁 删除 关键词
+"
                 "示例: /崩铁 删除 史瓦罗"
             )
             return
 
-        keyword = keyword.strip()
+        if len(keyword) > MAX_KEYWORD_LENGTH:
+            yield event.plain_result(
+                f"❌ 关键词过长（最大 {MAX_KEYWORD_LENGTH} 字符）"
+            )
+            return
 
         # 只能删除自定义金句
         original_count = len(self.custom_quotes)
         self.custom_quotes = [
-            q for q in self.custom_quotes 
+            q for q in self.custom_quotes
             if keyword not in q.get("content", "")
         ]
         deleted_count = original_count - len(self.custom_quotes)
 
         if deleted_count == 0:
-            yield event.plain_result("未找到包含「" + keyword + "」的自定义金句。" + chr(10) + "注意：默认金句无法删除。")
+            yield event.plain_result(
+                f"未找到包含「{keyword}」的自定义金句。
+"
+                "注意：默认金句无法删除。"
+            )
             return
 
         self.all_quotes = self.default_quotes + self.custom_quotes
 
         if self._save_custom_quotes():
             yield event.plain_result(
-                "已删除 " + str(deleted_count) + " 条包含「" + keyword + "」的金句。" + chr(10) +
-                f"当前共有 {len(self.all_quotes)} 条金句（自定义 {len(self.custom_quotes)} 条）"
+                f"已删除 {deleted_count} 条包含「{keyword}」的金句。
+"
+                f"当前共有 {len(self.all_quotes)} 条金句"
+                f"（自定义 {len(self.custom_quotes)} 条）"
             )
         else:
-            yield event.plain_result("删除失败，请检查文件权限。")
+            yield event.plain_result("❌ 删除失败，请检查文件权限。")
 
     @honkai_group.command("列表")
-    async def list_quotes(self, event: AstrMessageEvent, page: int = 1):
-        """列出所有自定义金句。用法: /崩铁 列表 [页码]"""
+    @handle_errors
+    async def list_quotes(
+        self,
+        event: AstrMessageEvent,
+        page: int = 1
+    ) -> AsyncGenerator[Any, None]:
+        """列出所有自定义金句
+
+        用法: /崩铁 列表 [页码]
+        """
         if not self.custom_quotes:
-            yield event.plain_result("暂无自定义金句。" + chr(10) + "使用 /崩铁 添加 来添加你的第一条金句吧！")
+            yield event.plain_result(
+                "暂无自定义金句。
+"
+                "使用 /崩铁 添加 来添加你的第一条金句吧！"
+            )
             return
 
-        per_page = 10
+        per_page = DEFAULT_QUOTES_PER_PAGE
         total_pages = (len(self.custom_quotes) + per_page - 1) // per_page
 
-        if page < 1:
-            page = 1
-        if page > total_pages:
-            page = total_pages
+        page = max(1, min(page, total_pages))
 
         start = (page - 1) * per_page
         end = start + per_page
         page_quotes = self.custom_quotes[start:end]
 
-        result = "自定义金句列表（第 " + str(page) + "/" + str(total_pages) + " 页，共 " + str(len(self.custom_quotes)) + " 条）" + chr(10)
-        result += "-" * 30 + chr(10)
+        lines = [
+            f"自定义金句列表（第 {page}/{total_pages} 页，"
+            f"共 {len(self.custom_quotes)} 条）",
+            "-" * 30,
+        ]
 
         for i, quote in enumerate(page_quotes, start=start + 1):
             content = quote.get("content", "")
@@ -374,105 +624,114 @@ class HonkaiStarRailQuotes(Star):
             # 截断过长的内容
             if len(content) > 30:
                 content = content[:30] + "..."
-            result += str(i) + ". [" + character + "] " + content + chr(10)
+            lines.append(f"{i}. [{character}] {content}")
 
         if total_pages > 1:
-            result += chr(10) + "使用 /崩铁 列表 " + str(page + 1 if page < total_pages else 1) + " 翻页"
+            next_page = page + 1 if page < total_pages else 1
+            lines.append(f"
+使用 /崩铁 列表 {next_page} 翻页")
 
-        yield event.plain_result(result)
+        yield event.plain_result("
+".join(lines))
 
     @honkai_group.command("统计")
-    async def stats_quotes(self, event: AstrMessageEvent):
+    @handle_errors
+    async def stats_quotes(self, event: AstrMessageEvent) -> AsyncGenerator[Any, None]:
         """查看金句统计信息"""
         # 统计各角色金句数量
-        char_count = {}
+        char_count: Dict[str, int] = {}
         for quote in self.all_quotes:
             char = quote.get("character", "未知角色")
             char_count[char] = char_count.get(char, 0) + 1
 
-        # 按数量排序
-        sorted_chars = sorted(char_count.items(), key=lambda x: (-x[1], x[0]))[:10]
+        # 按数量排序，取前10
+        sorted_chars = sorted(
+            char_count.items(),
+            key=lambda x: (-x[1], x[0])
+        )[:10]
 
-        result = "崩铁金句统计" + chr(10)
-        result += "-" * 30 + chr(10)
-        result += "总金句数: " + str(len(self.all_quotes)) + chr(10)
-        result += "  - 默认金句: " + str(len(self.default_quotes)) + chr(10)
-        result += "  - 自定义金句: " + str(len(self.custom_quotes)) + chr(10) + chr(10)
+        lines = [
+            "📊 崩铁金句统计",
+            "-" * 30,
+            f"总金句数: {len(self.all_quotes)}",
+            f"  ├─ 默认金句: {len(self.default_quotes)}",
+            f"  └─ 自定义金句: {len(self.custom_quotes)}",
+            "",
+            "🏆 金句最多的角色 TOP10:",
+        ]
 
-        result += "金句最多的角色 TOP10:" + chr(10)
         for i, (char, count) in enumerate(sorted_chars, 1):
-            result += str(i) + ". " + char + ": " + str(count) + "条" + chr(10)
+            lines.append(f"  {i}. {char}: {count}条")
 
         # 显示防刷屏配置
-        result += chr(10) + "防刷屏配置:" + chr(10)
-        result += "-" * 30 + chr(10)
-        result += "总开关: " + ("已开启" if self.anti_spam_enabled else "已关闭") + chr(10)
-        result += "  用户冷却: " + ("已开启" if self.user_cooldown_enabled else "已关闭")
-        if self.user_cooldown_enabled:
-            result += "（" + str(self.user_cooldown_seconds) + "秒）"
-        result += chr(10)
-        result += "  群聊日限: " + ("已开启" if self.group_daily_limit_enabled else "已关闭")
-        if self.group_daily_limit_enabled:
-            result += "（" + str(self.group_daily_limit) + "次/天）"
-        result += chr(10)
+        lines.extend([
+            "",
+            "⚙️ 防刷屏配置:",
+            "-" * 30,
+            f"总开关: {'✅ 已开启' if self.anti_spam_enabled else '❌ 已关闭'}",
+            f"  ├─ 用户冷却: {'✅ 已开启' if self.user_cooldown_enabled else '❌ 已关闭'}"
+            f"（{self.user_cooldown_seconds}秒）" if self.user_cooldown_enabled else "",
+            f"  └─ 群聊日限: {'✅ 已开启' if self.group_daily_limit_enabled else '❌ 已关闭'}"
+            f"（{self.group_daily_limit}次/天）" if self.group_daily_limit_enabled else "",
+        ])
 
-        yield event.plain_result(result)
+        yield event.plain_result("
+".join(lines))
 
     @honkai_group.command("帮助")
-    async def help_quotes(self, event: AstrMessageEvent):
+    @handle_errors
+    async def help_quotes(self, event: AstrMessageEvent) -> AsyncGenerator[Any, None]:
         """查看崩铁金句插件帮助信息"""
-        # 配置状态
-        spam_status = "已开启" if self.anti_spam_enabled else "已关闭"
-        user_cooldown_status = "已开启" if self.user_cooldown_enabled else "已关闭"
-        user_cooldown_time = f"{self.user_cooldown_seconds}秒" if self.user_cooldown_enabled else "N/A"
-        group_limit_status = "已开启" if self.group_daily_limit_enabled else "已关闭"
+        spam_status = "✅ 已开启" if self.anti_spam_enabled else "❌ 已关闭"
+        user_cd_status = "✅ 已开启" if self.user_cooldown_enabled else "❌ 已关闭"
+        user_cd_time = f"{self.user_cooldown_seconds}秒" if self.user_cooldown_enabled else "N/A"
+        group_limit_status = "✅ 已开启" if self.group_daily_limit_enabled else "❌ 已关闭"
         group_limit = f"{self.group_daily_limit}次/天" if self.group_daily_limit_enabled else "N/A"
 
-        help_lines = [
-            "崩坏：星穹铁道金句插件",
-            "",
-            "配置信息:",
-            "  总开关: " + spam_status,
-            "  用户冷却: " + user_cooldown_status + "（间隔: " + user_cooldown_time + "）",
-            "  群聊日限: " + group_limit_status + "（上限: " + group_limit + "）",
-            "",
-            "指令列表:",
-            "------------------------------",
-            "/崩铁 金句 - 随机输出一条金句",
-            "/崩铁 添加 <内容> [角色名] [来源] - 添加自定义金句",
-            "/崩铁 删除 <关键词> - 删除包含关键词的自定义金句",
-            "/崩铁 列表 [页码] - 查看自定义金句列表",
-            "/崩铁 统计 - 查看金句统计信息",
-            "/崩铁 帮助 - 显示此帮助信息",
-            "",
-            "使用示例:",
-            "------------------------------",
-            "/崩铁 金句",
-            "-> 随机输出一条金句",
-            "",
-            '/崩铁 添加 "规则就是用来打破的" 开拓者',
-            "-> 添加一条开拓者的金句",
-            "",
-            '/崩铁 添加 "帮帮我，史瓦罗先生！" 克拉拉 角色语音',
-            "-> 添加带来源的金句",
-            "",
-            "/崩铁 删除 史瓦罗",
-            '-> 删除所有包含"史瓦罗"的自定义金句',
-            "",
-            "/崩铁 列表 2",
-            "-> 查看第2页自定义金句",
-            "",
-            "注意事项:",
-            "------------------------------",
-            "- 默认金句无法删除，只能删除自定义金句",
-            "- 自定义金句保存在插件目录的 custom_quotes.json 中",
-            "- 添加金句时内容必填，角色名和来源可选",
-            "- 防刷屏配置可在 AstrBot WebUI 插件配置中修改",
-        ]
-        help_text = chr(10).join(help_lines)
+        help_text = f"""📖 崩坏：星穹铁道金句插件 v1.2.0
+━━━━━━━━━━━━━━━━━━━━
+
+⚙️ 配置信息:
+  总开关: {spam_status}
+  用户冷却: {user_cd_status}（间隔: {user_cd_time}）
+  群聊日限: {group_limit_status}（上限: {group_limit}）
+
+🔧 指令列表:
+━━━━━━━━━━━━━━━━━━━━
+/崩铁 金句          - 随机输出一条金句
+/崩铁 添加 <内容> [角色] [来源] - 添加自定义金句
+/崩铁 删除 <关键词>  - 删除包含关键词的自定义金句
+/崩铁 列表 [页码]    - 查看自定义金句列表
+/崩铁 统计           - 查看金句统计信息
+/崩铁 帮助           - 显示此帮助信息
+
+💡 使用示例:
+━━━━━━━━━━━━━━━━━━━━
+/崩铁 金句
+  → 随机输出一条金句
+
+/崩铁 添加 "规则就是用来打破的" 开拓者
+  → 添加一条开拓者的金句
+
+/崩铁 添加 "帮帮我，史瓦罗先生！" 克拉拉 角色语音
+  → 添加带来源的金句
+
+/崩铁 删除 史瓦罗
+  → 删除所有包含"史瓦罗"的自定义金句
+
+/崩铁 列表 2
+  → 查看第2页自定义金句
+
+⚠️ 注意事项:
+━━━━━━━━━━━━━━━━━━━━
+• 默认金句无法删除，只能删除自定义金句
+• 自定义金句保存在插件目录的 custom_quotes.json 中
+• 添加金句时内容必填，角色名和来源可选
+• 防刷屏配置可在 AstrBot WebUI 插件配置中修改
+"""
         yield event.plain_result(help_text)
 
-    async def terminate(self):
+    async def terminate(self) -> None:
         """插件卸载时保存数据"""
         self._save_custom_quotes()
         logger.info("崩铁金句插件已卸载，数据已保存。")

@@ -1,5 +1,5 @@
 """
-AstrBot 崩坏：星穹铁道金句插件 v1.3.0
+AstrBot 崩坏：星穹铁道金句插件 v1.3.1
 
 功能描述：
 - 随机输出《崩坏：星穹铁道》角色经典台词/金句
@@ -9,7 +9,7 @@ AstrBot 崩坏：星穹铁道金句插件 v1.3.0
 - 支持 WebUI Pages 管理自定义金句
 
 作者: HamLJYH
-版本: 1.3.0
+版本: 1.3.1
 日期: 2026-06-28
 """
 
@@ -91,7 +91,7 @@ def handle_errors(func):
     "astrbot_plugin_stellaron",
     "HamLJYH",
     "崩坏：星穹铁道金句插件",
-    "1.3.0",
+    "1.3.1",
     "https://github.com/HamLJYH/astrbot_plugin_stellaron"
 )
 class StellaronPlugin(Star):
@@ -856,19 +856,21 @@ class StellaronPlugin(Star):
         self.all_quotes = self.default_quotes + self.custom_quotes
 
         if self._save_custom_quotes():
-            deleted_contents = [q.get("content", "")[:30] + "..." if len(q.get("content", "")) > 30 else q.get("content", "") for q in matched_quotes]
+            deleted_contents = [
+                q.get("content", "")[:30] + "..."
+                if len(q.get("content", "")) > 30
+                else q.get("content", "")
+                for q in matched_quotes
+            ]
             logger.info(f"[WebAPI] 删除成功: 删除 {deleted_count} 条金句")
             return json_response({
                 "deleted": deleted_count,
                 "contents": deleted_contents,
                 "total": len(self.custom_quotes),
             })
-        else:
-            # 保存失败，恢复数据
-            self.custom_quotes = [
-q for q in self.custom_quotes
-            ]  # 实际上已经删了，这里需要重新加载
+       else:
+            # 保存失败，从文件重新加载以恢复数据
             self.custom_quotes = self._load_custom_quotes()
             self.all_quotes = self.default_quotes + self.custom_quotes
             logger.error("[WebAPI] 删除失败: 保存文件失败，已恢复数据")
-            return error_response("保存失败，请检查文件权限", status_code=500
+            return error_response("保存失败，请检查文件权限", status_code=500)

@@ -179,6 +179,27 @@ async function handleAdd() {
   }
 }
 
+// 删除金句
+async function handleDelete(index, content) {
+  if (
+    !confirm(
+      `确定要删除这条金句吗？\n\n"${content.substring(0, 50)}${ content.length > 50 ? "..." : "" }"`
+    )
+  ) {
+    return;
+  }
+
+  try {
+    await bridge.apiPost("custom-quotes/delete", {
+      keyword: content,
+    });
+
+    loadQuotes();
+  } catch (err) {
+    alert(`删除失败: ${err.message}`);
+  }
+}
+
 // 搜索
 function handleSearch(e) {
   searchKeyword = e.target.value.trim();

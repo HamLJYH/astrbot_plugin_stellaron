@@ -90,7 +90,7 @@ def handle_errors(func):
     "astrbot_plugin_stellaron",
     "HamLJYH",
     "崩坏：星穹铁道金句插件",
-    "1.2.0",
+    "1.3.0",
     "https://github.com/HamLJYH/astrbot_plugin_stellaron"
 )
 class StellaronPlugin(Star):

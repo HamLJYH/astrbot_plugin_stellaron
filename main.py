@@ -150,6 +150,9 @@ class StellaronPlugin(Star):
             f"（默认 {len(self.default_quotes)} 条，自定义 {len(self.custom_quotes)} 条）"
         )
 
+        # 注册 Web API（供插件 Pages 使用）
+        self._register_web_apis()
+
     def _load_default_quotes(self) -> List[Dict[str, str]]:
         """加载内置默认金句"""
         return [
@@ -709,3 +712,132 @@ class StellaronPlugin(Star):
         """插件卸载时保存数据"""
         self._save_custom_quotes()
         logger.info("崩铁金句插件已卸载，数据已保存。")
+
+    # =========================================================================
+    # Web API (供插件 Pages 使用)
+    # =========================================================================
+
+    def _register_web_apis(self) -> None:
+        """注册插件 Web API"""
+        PLUGIN_NAME = "astrbot_plugin_stellaron"
+
+        self.context.register_web_api(
+            f"/{PLUGIN_NAME}/custom-quotes/list",
+            self._api_list_custom_quotes,
+            ["GET"],
+            "获取自定义金句列表",
+        )
+
+        self.context.register_web_api(
+            f"/{PLUGIN_NAME}/custom-quotes/add",
+            self._api_add_custom_quote,
+            ["POST"],
+            "添加自定义金句",
+        )
+
+        self.context.register_web_api(
+            f"/{PLUGIN_NAME}/custom-quotes/delete",
+            self._api_delete_custom_quote,
+            ["POST"],
+            "删除自定义金句",
+        )
+
+    async def _api_list_custom_quotes(self):
+        """API: 获取自定义金句列表"""
+        from astrbot.api.web import json_response, request
+
+        page = request.query.get("page", 1, type=int)
+        per_page = request.query.get("per_page", 10, type=int)
+        keyword = request.query.get("keyword", "", type=str).strip()
+
+        quotes = self.custom_quotes
+        if keyword:
+            quotes = [
+                q for q in quotes
+                if keyword in q.get("content", "")
+                or keyword in q.get("character", "")
+            ]
+
+        total = len(quotes)
+        total_pages = max(1, (total + per_page - 1) // per_page)
+        page = max(1, min(page, total_pages))
+
+        start = (page - 1) * per_page
+        end = start + per_page
+        page_quotes = quotes[start:end]
+
+        return json_response({
+            "quotes": page_quotes,
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+            "total_pages": total_pages,
+            "total_custom": len(self.custom_quotes),
+            "total_default": len(self.default_quotes),
+        })
+
+    async def _api_add_custom_quote(self):
+        """API: 添加自定义金句"""
+        from astrbot.api.web import error_response, json_response, request
+
+        payload = await request.json(default={})
+
+        content = payload.get("content", "").strip()
+        character = payload.get("character", "未知角色").strip()
+        source = payload.get("source", "").strip()
+
+        if not content:
+            return error_response("金句内容不能为空", status_code=400)
+
+        if len(content) > MAX_QUOTE_LENGTH:
+            return error_response(f"金句内容过长（最大 {MAX_QUOTE_LENGTH} 字符）", status_code=400)
+
+        if len(character) > MAX_CHARACTER_LENGTH:
+            return error_response(f"角色名过长（最大 {MAX_CHARACTER_LENGTH} 字符）", status_code=400)
+
+        if len(source) > MAX_SOURCE_LENGTH:
+            return error_response(f"来源过长（最大 {MAX_SOURCE_LENGTH} 字符）", status_code=400)
+
+        new_quote = {
+            "content": content,
+            "character": character or "未知角色",
+            "source": source,
+        }
+
+        self.custom_quotes.append(new_quote)
+        self.all_quotes = self.default_quotes + self.custom_quotes
+
+        if self._save_custom_quotes():
+            return json_response({"saved": True, "total": len(self.custom_quotes)})
+        else:
+            return error_response("保存失败，请检查文件权限", status_code=500)
+
+    async def _api_delete_custom_quote(self):
+        """API: 删除自定义金句（精确匹配内容）"""
+        from astrbot.api.web import error_response, json_response, request
+
+        payload = await request.json(default={})
+        content = payload.get("keyword", "").strip()
+
+        if not content:
+            return error_response("内容不能为空", status_code=400)
+
+        original_count = len(self.custom_quotes)
+        self.custom_quotes = [
+            q for q in self.custom_quotes
+            if q.get("content", "") != content
+        ]
+        deleted_count = original_count - len(self.custom_quotes)
+
+        if deleted_count == 0:
+            return error_response("未找到匹配的金句", status_code=404)
+
+        self.all_quotes = self.default_quotes + self.custom_quotes
+
+        if self._save_custom_quotes():
+            return json_response({
+                "deleted": deleted_count,
+                "total": len(self.custom_quotes),
+            })
+        else:
+            return error_response("保存失败，请检查文件权限", status_code=500)

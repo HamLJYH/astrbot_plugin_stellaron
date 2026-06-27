@@ -3,6 +3,7 @@ const bridge = window.AstrBotPluginPage;
 // 状态
 let currentPage = 1;
 let perPage = 10;
+let allQuotes = [];
 let searchKeyword = "";
 
 // DOM 元素
@@ -32,46 +33,6 @@ async function init() {
   els.content.addEventListener("keydown", (e) => {
     if (e.ctrlKey && e.key === "Enter") handleAdd();
   });
-
-  // 事件委托：绑定删除按钮（关键修复）
-  els.quotesList.addEventListener("click", handleListClick);
-}
-
-// 列表点击事件委托
-async function handleListClick(e) {
-  const btn = e.target.closest(".btn-danger");
-  if (!btn) return;
-
-  // 获取真实全局索引
-  const index = parseInt(btn.dataset.index, 10);
-  const content = btn.dataset.content || "";
-
-  if (isNaN(index)) {
-    alert("删除失败：无法获取索引");
-    return;
-  }
-
-  if (
-    !confirm(
-      `确定要删除这条金句吗？\n\n"${content.substring(0, 50)}${content.length > 50 ? "..." : ""}"`
-    )
-  ) {
-    return;
-  }
-
-  try {
-    console.log("Deleting index:", index);
-    const result = await bridge.apiPost("custom-quotes/delete", {
-      index: index,
-    });
-    console.log("Delete result:", result);
-
-    // 删除成功后刷新列表
-    loadQuotes();
-  } catch (err) {
-    console.error("Delete error:", err);
-    alert(`删除失败: ${err.message}`);
-  }
 }
 
 // 加载金句列表
@@ -85,7 +46,8 @@ async function loadQuotes() {
       keyword: searchKeyword,
     });
 
-    renderQuotes(result.quotes || [], result.page, result.per_page);
+    allQuotes = result.quotes || [];
+    renderQuotes(allQuotes);
     renderPagination(
       result.total,
       result.page,
@@ -97,38 +59,41 @@ async function loadQuotes() {
     els.statTotal.textContent = result.total_custom || 0;
     els.statDefault.textContent = result.total_default || 0;
   } catch (err) {
-    console.error("Load error:", err);
     els.quotesList.innerHTML = `<div class="empty">❌ 加载失败: ${err.message}</div>`;
   }
 }
 
 // 渲染金句列表
-function renderQuotes(quotes, page, pageSize) {
+function renderQuotes(quotes) {
   if (!quotes || quotes.length === 0) {
     els.quotesList.innerHTML =
       '<div class="empty">暂无自定义金句，快去添加一条吧！</div>';
     return;
   }
 
-  // 计算当前页第一条的真实全局索引
-  const startIndex = ((page || currentPage) - 1) * (pageSize || perPage);
-
   els.quotesList.innerHTML = quotes
-    .map((q, idx) => {
-      const realIndex = startIndex + idx;
-      return `
-        <div class="quote-item">
+    .map(
+      (q, idx) => `
+        <div class="quote-item" data-index="${idx}">
             <div class="quote-content">${escapeHtml(q.content)}</div>
             <div class="quote-meta">
                 <div class="quote-tags">
-                    <span class="tag">${escapeHtml(q.character || "未知角色")}</span>
-                    ${q.source ? `<span class="tag source">${escapeHtml(q.source)}</span>` : ""}
+                    <span class="tag">${escapeHtml(
+                      q.character || "未知角色"
+                    )}</span>
+                    ${
+                      q.source
+                        ? `<span class="tag source">${escapeHtml(
+                            q.source
+                          )}</span>`
+                        : ""
+                    }
                 </div>
-                <button class="btn-danger" data-index="${realIndex}" data-content="${escapeHtml(q.content)}">🗑️ 删除</button>
+                <button class="btn-danger" onclick="handleDelete(${idx}, '${escapeHtml( q.content ).replace(/'/g, "'")}')">🗑️ 删除</button>
             </div>
         </div>
-      `;
-    })
+    `
+    )
     .join("");
 }
 
@@ -214,6 +179,27 @@ async function handleAdd() {
   }
 }
 
+// 删除金句
+async function handleDelete(index, content) {
+  if (
+    !confirm(
+      `确定要删除这条金句吗？\n\n"${content.substring(0, 50)}${ content.length > 50 ? "..." : "" }"`
+    )
+  ) {
+    return;
+  }
+
+  try {
+    await bridge.apiPost("custom-quotes/delete", {
+      keyword: content,
+    });
+
+    loadQuotes();
+  } catch (err) {
+    alert(`删除失败: ${err.message}`);
+  }
+}
+
 // 搜索
 function handleSearch(e) {
   searchKeyword = e.target.value.trim();
@@ -239,7 +225,6 @@ function showMsg(id, text, type) {
 
 // HTML 转义
 function escapeHtml(text) {
-  if (!text) return "";
   const div = document.createElement("div");
   div.textContent = text;
   return div.innerHTML;

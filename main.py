@@ -813,31 +813,31 @@ class StellaronPlugin(Star):
             return error_response("保存失败，请检查文件权限", status_code=500)
 
     async def _api_delete_custom_quote(self):
-        """API: 删除自定义金句（精确匹配内容）"""
+        """API: 删除自定义金句（通过索引）"""
         from astrbot.api.web import error_response, json_response, request
 
         payload = await request.json(default={})
-        content = payload.get("keyword", "").strip()
+        index = payload.get("index", -1)
 
-        if not content:
-            return error_response("内容不能为空", status_code=400)
+        logger.info(f"[WebAPI] 删除请求, index={index}, 当前自定义金句数={len(self.custom_quotes)}")
 
-        original_count = len(self.custom_quotes)
-        self.custom_quotes = [
-            q for q in self.custom_quotes
-            if q.get("content", "") != content
-        ]
-        deleted_count = original_count - len(self.custom_quotes)
+        if not isinstance(index, int) or index < 0 or index >= len(self.custom_quotes):
+            logger.warning(f"[WebAPI] 删除失败: 无效索引 {index}")
+            return error_response("无效的索引", status_code=400)
 
-        if deleted_count == 0:
-            return error_response("未找到匹配的金句", status_code=404)
-
+        deleted_quote = self.custom_quotes.pop(index)
         self.all_quotes = self.default_quotes + self.custom_quotes
 
         if self._save_custom_quotes():
+            logger.info(f"[WebAPI] 删除成功: {deleted_quote.get('content', '')[:30]}...")
             return json_response({
-                "deleted": deleted_count,
+                "deleted": 1,
+                "content": deleted_quote.get("content", ""),
                 "total": len(self.custom_quotes),
             })
         else:
+            # 恢复数据
+            self.custom_quotes.insert(index, deleted_quote)
+            self.all_quotes = self.default_quotes + self.custom_quotes
+            logger.error("[WebAPI] 删除失败: 保存文件失败")
             return error_response("保存失败，请检查文件权限", status_code=500)

@@ -1,16 +1,15 @@
 """
-AstrBot 崩坏：星穹铁道金句插件 v1.3.1
+AstrBot 崩坏：星穹铁道金句插件 v1.3.0
 
 功能描述：
 - 随机输出《崩坏：星穹铁道》角色经典台词/金句
 - 支持用户自定义添加、删除、列表查看金句
 - 支持防刷屏机制（用户冷却、群聊日限）
 - 支持统计分析
-- 支持 WebUI Pages 管理自定义金句
 
 作者: HamLJYH
-版本: 1.3.1
-日期: 2026-06-28
+版本: 1.3.0
+日期: 2026-06-26
 """
 
 # 标准库
@@ -91,7 +90,7 @@ def handle_errors(func):
     "astrbot_plugin_stellaron",
     "HamLJYH",
     "崩坏：星穹铁道金句插件",
-    "1.3.1",
+    "1.3.0",
     "https://github.com/HamLJYH/astrbot_plugin_stellaron"
 )
 class StellaronPlugin(Star):
@@ -315,10 +314,10 @@ class StellaronPlugin(Star):
         try:
             with open(self.custom_quotes_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                if isinstance(data, list):
-                    return data
-                logger.warning("custom_quotes.json 格式不正确，应为列表")
-                return []
+            if isinstance(data, list):
+                return data
+            logger.warning("custom_quotes.json 格式不正确，应为列表")
+            return []
         except json.JSONDecodeError as e:
             logger.error(f"解析自定义金句 JSON 失败: {e}")
             return []
@@ -356,7 +355,7 @@ class StellaronPlugin(Star):
         result = f"**{character}**"
         if source:
             result += f" · *{source}*"
-        result += f"\n{content}"
+        result += f"\n{content}"  # ← 修复：\n 用转义，不要真的换行
         return result
 
     def _validate_quote_content(self, content: str) -> Tuple[bool, str]:
@@ -512,7 +511,7 @@ class StellaronPlugin(Star):
 
         if self._save_custom_quotes():
             yield event.plain_result(
-                f"金句添加成功！\n"
+                f"金句添加成功！\n"  # ← 修复：\n 用转义
                 f"{self._format_quote(new_quote)}\n"
                 f"当前共有 {len(self.all_quotes)} 条金句"
                 f"（自定义 {len(self.custom_quotes)} 条）"
@@ -616,7 +615,7 @@ class StellaronPlugin(Star):
 
         if total_pages > 1:
             next_page = page + 1 if page < total_pages else 1
-            lines.append(f"\n使用 /崩铁 列表 {next_page} 翻页")
+            lines.append(f"\n使用 /崩铁 列表 {next_page} 翻页")  # ← 修复：\n 用转义
 
         yield event.plain_result("\n".join(lines))
 
@@ -640,20 +639,21 @@ class StellaronPlugin(Star):
         top10_parts = []
         for i, (char, count) in enumerate(sorted_chars, 1):
             top10_parts.append(f"{i}.{char}({count})")
-        top10_str = " ".join(top10_parts)
+        top10_str = "  ".join(top10_parts)
 
         lines = [
             "📊 崩铁金句统计",
             "-" * 30,
             f"总金句数: {len(self.all_quotes)}",
-            f" • 默认金句: {len(self.default_quotes)}",
-            f" • 自定义金句: {len(self.custom_quotes)}",
+            f"  • 默认金句: {len(self.default_quotes)}",
+            f"  • 自定义金句: {len(self.custom_quotes)}",
             "",
             "🏆 金句最多的角色 TOP10:",
             top10_str,
         ]
 
         yield event.plain_result("\n".join(lines))
+
 
     @honkai_group.command("帮助")
     @handle_errors
@@ -665,7 +665,7 @@ class StellaronPlugin(Star):
         group_limit_status = "✅ 已开启" if self.group_daily_limit_enabled else "❌ 已关闭"
         group_limit = f"{self.group_daily_limit}次/天" if self.group_daily_limit_enabled else "N/A"
 
-        help_text = f"""📖 崩坏：星穹铁道金句插件 v1.3.1
+        help_text = f"""📖 崩坏：星穹铁道金句插件 v1.2.0
 ━━━━━━━━━━━━━━━━━━━━
 
 ⚙️ 配置信息:
@@ -813,33 +813,16 @@ class StellaronPlugin(Star):
             return error_response("保存失败，请检查文件权限", status_code=500)
 
     async def _api_delete_custom_quote(self):
-        """API: 删除自定义金句（通过内容关键词匹配）
-
-        修复说明：
-        原实现通过索引删除，但前端传递的是金句内容字符串，导致索引始终为-1而删除失败。
-        现改为通过内容关键词匹配删除，与前端逻辑及聊天指令 /崩铁 删除 保持一致。
-        """
+        """API: 删除自定义金句"""
         from astrbot.api.web import error_response, json_response, request
 
         payload = await request.json(default={})
         keyword = payload.get("keyword", "").strip()
 
-        logger.info(f"[WebAPI] 删除请求, keyword={keyword!r}, 当前自定义金句数={len(self.custom_quotes)}")
-
         if not keyword:
-            logger.warning("[WebAPI] 删除失败: 关键词为空")
             return error_response("关键词不能为空", status_code=400)
 
-        if len(keyword) > MAX_KEYWORD_LENGTH:
-            logger.warning(f"[WebAPI] 删除失败: 关键词过长 ({len(keyword)} 字符)")
-            return error_response(f"关键词过长（最大 {MAX_KEYWORD_LENGTH} 字符）", status_code=400)
-
-        # 通过关键词匹配删除（与聊天指令 /崩铁 删除 逻辑一致）
         original_count = len(self.custom_quotes)
-        matched_quotes = [
-            q for q in self.custom_quotes
-            if keyword in q.get("content", "")
-        ]
         self.custom_quotes = [
             q for q in self.custom_quotes
             if keyword not in q.get("content", "")
@@ -847,30 +830,14 @@ class StellaronPlugin(Star):
         deleted_count = original_count - len(self.custom_quotes)
 
         if deleted_count == 0:
-            logger.warning(f"[WebAPI] 删除失败: 未找到包含「{keyword}」的金句")
-            return error_response(
-                f"未找到包含「{keyword}」的自定义金句。注意：默认金句无法删除。",
-                status_code=404
-            )
+            return error_response("未找到匹配的金句", status_code=404)
 
         self.all_quotes = self.default_quotes + self.custom_quotes
 
         if self._save_custom_quotes():
-            deleted_contents = [
-                q.get("content", "")[:30] + "..."
-                if len(q.get("content", "")) > 30
-                else q.get("content", "")
-                for q in matched_quotes
-            ]
-            logger.info(f"[WebAPI] 删除成功: 删除 {deleted_count} 条金句")
             return json_response({
                 "deleted": deleted_count,
-                "contents": deleted_contents,
                 "total": len(self.custom_quotes),
             })
- else:
-            # 保存失败，从文件重新加载以恢复数据
-            self.custom_quotes = self._load_custom_quotes()
-            self.all_quotes = self.default_quotes + self.custom_quotes
-            logger.error("[WebAPI] 删除失败: 保存文件失败，已恢复数据")
+        else:
             return error_response("保存失败，请检查文件权限", status_code=500)

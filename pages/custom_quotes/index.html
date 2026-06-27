@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>自定义金句管理</title>
+<link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+<div class="container">
+    <h1>📝 自定义金句管理</h1>
+    <p class="subtitle">管理你的自定义金句，内置金句不可编辑</p>
+    
+    <div class="card add-form">
+        <h2>添加新金句</h2>
+        <div class="form-group">
+            <label>金句内容 <span class="required">*</span></label>
+            <textarea id="content" rows="3" placeholder="输入金句内容..."></textarea>
+            <span class="hint">最多500字符</span>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>角色名</label>
+                <input type="text" id="character" placeholder="未知角色" />
+                <span class="hint">最多50字符</span>
+            </div>
+            <div class="form-group">
+                <label>来源</label>
+                <input type="text" id="source" placeholder="例如：角色语音、剧情台词" />
+                <span class="hint">最多50字符</span>
+            </div>
+        </div>
+        <button id="btn-add" class="btn-primary">➕ 添加金句</button>
+        <div id="add-msg" class="msg"></div>
+    </div>
+    
+    <div class="stats-bar">
+        <div class="stat-item">
+            <span class="stat-num" id="stat-total">0</span>
+            <span class="stat-label">自定义金句</span>
+        </div>
+        <div class="stat-item">
+            <span class="stat-num" id="stat-default">0</span>
+            <span class="stat-label">内置金句</span>
+        </div>
+    </div>
+    
+    <div class="card list-card">
+        <div class="list-header">
+            <h2>📋 自定义金句列表</h2>
+            <div class="search-box">
+                <input type="text" id="search" placeholder="🔍 搜索金句或角色..." />
+            </div>
+        </div>
+        <div id="quotes-list" class="quotes-list">
+            <div class="loading">加载中...</div>
+        </div>
+        <div class="pagination" id="pagination"></div>
+    </div>
+</div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

@@ -71,10 +71,17 @@ function renderQuotes(quotes) {
     return;
   }
 
+  // 计算当前页第一条的真实索引（用于精准删除）
+  const startIndex = (currentPage - 1) * perPage;
+
   els.quotesList.innerHTML = quotes
     .map(
-      (q, idx) => `
-        <div class="quote-item" data-index="${idx}">
+      (q, idx) => {
+        const realIndex = startIndex + idx;
+        // 安全转义 content 用于 onclick 属性
+        const safeContent = escapeHtml(q.content).replace(/\'/g, "\\\'").replace(/"/g, "\&quot;");
+        return `
+        <div class="quote-item" data-index="${realIndex}">
             <div class="quote-content">${escapeHtml(q.content)}</div>
             <div class="quote-meta">
                 <div class="quote-tags">
@@ -89,10 +96,11 @@ function renderQuotes(quotes) {
                         : ""
                     }
                 </div>
-                <button class="btn-danger" onclick="handleDelete(${idx}, '${escapeHtml( q.content ).replace(/'/g, "'")}')">🗑️ 删除</button>
+                <button class="btn-danger" onclick="handleDelete(${realIndex}, '${safeContent}')">🗑️ 删除</button>
             </div>
         </div>
-    `
+    `;
+      }
     )
     .join("");
 }
@@ -155,7 +163,7 @@ async function handleAdd() {
   els.btnAdd.textContent = "添加中...";
 
   try {
-    await bridge.apiPost("custom-quotes/add", {
+    const result = await bridge.apiPost("custom-quotes/add", {
       content,
       character,
       source,
@@ -168,9 +176,16 @@ async function handleAdd() {
     els.character.value = "";
     els.source.value = "";
 
-    // 刷新列表
-    currentPage = 1;
-    loadQuotes();
+    // 刷新列表（使用后端返回的列表直接 re-render，减少一次请求）
+    if (result.quotes) {
+      allQuotes = result.quotes.slice(0, perPage);
+      renderQuotes(allQuotes);
+      // 更新统计
+      els.statTotal.textContent = result.total || 0;
+    } else {
+      currentPage = 1;
+      loadQuotes();
+    }
   } catch (err) {
     showMsg("add-msg", `❌ 添加失败: ${err.message}`, "error");
   } finally {
@@ -179,7 +194,7 @@ async function handleAdd() {
   }
 }
 
-// 删除金句
+// 删除金句 — 改用 index 精准删除（Bug 修复）
 async function handleDelete(index, content) {
   if (
     !confirm(
@@ -190,11 +205,24 @@ async function handleDelete(index, content) {
   }
 
   try {
-    await bridge.apiPost("custom-quotes/delete", {
-      keyword: content,
+    const result = await bridge.apiPost("custom-quotes/delete", {
+      index: index,   // ← 传真实索引，不再传 keyword（修复 Bug）
     });
 
-    loadQuotes();
+    // 直接使用后端返回的列表 re-render，减少一次请求
+    if (result.quotes) {
+      allQuotes = result.quotes.slice((currentPage - 1) * perPage, currentPage * perPage);
+      renderQuotes(allQuotes);
+      // 更新统计
+      els.statTotal.textContent = result.total || 0;
+      // 如果当前页空了，回到上一页
+      if (allQuotes.length === 0 && currentPage > 1) {
+        currentPage--;
+        loadQuotes();
+      }
+    } else {
+      loadQuotes();
+    }
   } catch (err) {
     alert(`删除失败: ${err.message}`);
   }

@@ -866,3 +866,9 @@ class StellaronPlugin(Star):
         else:
             # 保存失败，恢复数据
             self.custom_quotes = [
+q for q in self.custom_quotes
+            ]  # 实际上已经删了，这里需要重新加载
+            self.custom_quotes = self._load_custom_quotes()
+            self.all_quotes = self.default_quotes + self.custom_quotes
+            logger.error("[WebAPI] 删除失败: 保存文件失败，已恢复数据")
+            return error_response("保存失败，请检查文件权限", status_code=500

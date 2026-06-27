@@ -868,7 +868,7 @@ class StellaronPlugin(Star):
                 "contents": deleted_contents,
                 "total": len(self.custom_quotes),
             })
-       else:
+ else:
             # 保存失败，从文件重新加载以恢复数据
             self.custom_quotes = self._load_custom_quotes()
             self.all_quotes = self.default_quotes + self.custom_quotes

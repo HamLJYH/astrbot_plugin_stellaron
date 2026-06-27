@@ -1,5 +1,5 @@
 """
-AstrBot 崩坏：星穹铁道金句插件 v1.3.1
+AstrBot 崩坏：星穹铁道金句插件 v1.2.0
 
 功能描述：
 - 随机输出《崩坏：星穹铁道》角色经典台词/金句
@@ -8,8 +8,8 @@ AstrBot 崩坏：星穹铁道金句插件 v1.3.1
 - 支持统计分析
 
 作者: HamLJYH
-版本: 1.3.1
-日期: 2026-06-28
+版本: 1.2.0
+日期: 2026-06-26
 """
 
 # 标准库
@@ -18,8 +18,6 @@ import functools
 import json
 import os
 import random
-import shutil
-import tempfile
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
@@ -92,7 +90,7 @@ def handle_errors(func):
     "astrbot_plugin_stellaron",
     "HamLJYH",
     "崩坏：星穹铁道金句插件",
-    "1.3.1",
+    "1.2.0",
     "https://github.com/HamLJYH/astrbot_plugin_stellaron"
 )
 class StellaronPlugin(Star):
@@ -316,10 +314,10 @@ class StellaronPlugin(Star):
         try:
             with open(self.custom_quotes_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                if isinstance(data, list):
-                    return data
-                logger.warning("custom_quotes.json 格式不正确，应为列表")
-                return []
+            if isinstance(data, list):
+                return data
+            logger.warning("custom_quotes.json 格式不正确，应为列表")
+            return []
         except json.JSONDecodeError as e:
             logger.error(f"解析自定义金句 JSON 失败: {e}")
             return []
@@ -328,28 +326,17 @@ class StellaronPlugin(Star):
             return []
 
     def _save_custom_quotes(self) -> bool:
-        """保存用户自定义金句（原子写入，防止写入中断导致文件损坏）
+        """保存用户自定义金句
 
         Returns:
             是否保存成功
         """
         try:
-            # 先写入临时文件（原子写入）
-            fd, temp_path = tempfile.mkstemp(
-                suffix=".json",
-                dir=os.path.dirname(self.custom_quotes_file)
-            )
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
+            with open(self.custom_quotes_file, "w", encoding="utf-8") as f:
                 json.dump(self.custom_quotes, f, ensure_ascii=False, indent=2)
-
-            # 原子替换原文件
-            shutil.move(temp_path, self.custom_quotes_file)
             return True
         except Exception as e:
             logger.error(f"保存自定义金句失败: {e}")
-            # 清理临时文件
-            if "temp_path" in locals() and os.path.exists(temp_path):
-                os.remove(temp_path)
             return False
 
     def _format_quote(self, quote: Dict[str, str]) -> str:
@@ -652,20 +639,21 @@ class StellaronPlugin(Star):
         top10_parts = []
         for i, (char, count) in enumerate(sorted_chars, 1):
             top10_parts.append(f"{i}.{char}({count})")
-        top10_str = " ".join(top10_parts)
+        top10_str = "  ".join(top10_parts)
 
         lines = [
             "📊 崩铁金句统计",
             "-" * 30,
             f"总金句数: {len(self.all_quotes)}",
-            f" • 默认金句: {len(self.default_quotes)}",
-            f" • 自定义金句: {len(self.custom_quotes)}",
+            f"  • 默认金句: {len(self.default_quotes)}",
+            f"  • 自定义金句: {len(self.custom_quotes)}",
             "",
             "🏆 金句最多的角色 TOP10:",
             top10_str,
         ]
 
         yield event.plain_result("\n".join(lines))
+
 
     @honkai_group.command("帮助")
     @handle_errors
@@ -677,13 +665,13 @@ class StellaronPlugin(Star):
         group_limit_status = "✅ 已开启" if self.group_daily_limit_enabled else "❌ 已关闭"
         group_limit = f"{self.group_daily_limit}次/天" if self.group_daily_limit_enabled else "N/A"
 
-        help_text = f"""📖 崩坏：星穹铁道金句插件 v1.3.1
+        help_text = f"""📖 崩坏：星穹铁道金句插件 v1.2.0
 ━━━━━━━━━━━━━━━━━━━━
 
 ⚙️ 配置信息:
- 总开关: {spam_status}
- 用户冷却: {user_cd_status}（间隔: {user_cd_time}）
- 群聊日限: {group_limit_status}（上限: {group_limit}）
+  总开关: {spam_status}
+  用户冷却: {user_cd_status}（间隔: {user_cd_time}）
+  群聊日限: {group_limit_status}（上限: {group_limit}）
 
 🔧 指令列表:
 ━━━━━━━━━━━━━━━━━━━━
@@ -820,77 +808,21 @@ class StellaronPlugin(Star):
         self.all_quotes = self.default_quotes + self.custom_quotes
 
         if self._save_custom_quotes():
-            return json_response({
-                "saved": True,
-                "total": len(self.custom_quotes),
-                "quotes": self.custom_quotes,  # 返回完整列表，方便前端 re-render
-            })
+            return json_response({"saved": True, "total": len(self.custom_quotes)})
         else:
             return error_response("保存失败，请检查文件权限", status_code=500)
 
     async def _api_delete_custom_quote(self):
-        """API: 删除自定义金句
-
-        支持两种删除模式：
-        1. 按索引删除（推荐，Pages 前端使用）：payload 包含 index 字段
-        2. 按关键词删除（兼容旧版）：payload 包含 keyword 字段
-
-        遵循 Read -> Filter -> Write -> Re-render 流程
-        """
+        """API: 删除自定义金句"""
         from astrbot.api.web import error_response, json_response, request
 
         payload = await request.json(default={})
-
-        # ========== 模式1: 按索引精准删除（Pages 前端推荐） ==========
-        if "index" in payload:
-            try:
-                index = int(payload["index"])
-            except (ValueError, TypeError):
-                return error_response("索引必须是整数", status_code=400)
-
-            # Step 1: Read - 检查索引有效性
-            if index < 0 or index >= len(self.custom_quotes):
-                return error_response(
-                    f"索引越界，当前共有 {len(self.custom_quotes)} 条自定义金句",
-                    status_code=404
-                )
-
-            # Step 2: Filter - 移除指定索引的元素
-            deleted_quote = self.custom_quotes[index]
-            self.custom_quotes = [
-                q for i, q in enumerate(self.custom_quotes)
-                if i != index
-            ]
-            deleted_count = 1
-
-            # Step 3: Write - 保存到文件
-            self.all_quotes = self.default_quotes + self.custom_quotes
-
-            if self._save_custom_quotes():
-                # Step 4: Re-render - 返回更新后的完整列表信息
-                return json_response({
-                    "deleted": deleted_count,
-                    "deleted_quote": deleted_quote,
-                    "total": len(self.custom_quotes),
-                    "total_default": len(self.default_quotes),
-                    "quotes": self.custom_quotes,  # 返回更新后的完整列表，方便前端 re-render
-                })
-            else:
-                # 回滚：保存失败时恢复数据
-                self.custom_quotes.insert(index, deleted_quote)
-                self.all_quotes = self.default_quotes + self.custom_quotes
-                return error_response("保存失败，请检查文件权限", status_code=500)
-
-        # ========== 模式2: 按关键词模糊删除（兼容旧指令） ==========
         keyword = payload.get("keyword", "").strip()
 
         if not keyword:
-            return error_response("请提供 index 或 keyword 参数", status_code=400)
+            return error_response("关键词不能为空", status_code=400)
 
-        # Step 1: Read - 记录原始数量
         original_count = len(self.custom_quotes)
-
-        # Step 2: Filter - 过滤掉匹配关键词的金句
         self.custom_quotes = [
             q for q in self.custom_quotes
             if keyword not in q.get("content", "")
@@ -900,19 +832,12 @@ class StellaronPlugin(Star):
         if deleted_count == 0:
             return error_response("未找到匹配的金句", status_code=404)
 
-        # Step 3: Write - 保存到 custom_quotes.json
         self.all_quotes = self.default_quotes + self.custom_quotes
 
         if self._save_custom_quotes():
-            # Step 4: Re-render - 返回更新后的数据
             return json_response({
                 "deleted": deleted_count,
                 "total": len(self.custom_quotes),
-                "total_default": len(self.default_quotes),
-                "quotes": self.custom_quotes,  # 返回完整列表，方便前端 re-render
             })
         else:
-            # 回滚：保存失败时恢复数据
-            self.custom_quotes = self._load_custom_quotes()
-            self.all_quotes = self.default_quotes + self.custom_quotes
             return error_response("保存失败，请检查文件权限", status_code=500)

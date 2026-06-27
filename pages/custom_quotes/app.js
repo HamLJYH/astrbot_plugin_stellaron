@@ -47,7 +47,7 @@ async function loadQuotes() {
     });
 
     allQuotes = result.quotes || [];
-    renderQuotes(allQuotes);
+    renderQuotes(allQuotes, result.page, result.per_page);
     renderPagination(
       result.total,
       result.page,
@@ -64,45 +64,84 @@ async function loadQuotes() {
 }
 
 // 渲染金句列表
-function renderQuotes(quotes) {
+// page 和 perPage 用于计算全局真实索引
+function renderQuotes(quotes, page, pageSize) {
   if (!quotes || quotes.length === 0) {
     els.quotesList.innerHTML =
       '<div class="empty">暂无自定义金句，快去添加一条吧！</div>';
     return;
   }
 
-  // 计算当前页第一条的真实索引（用于精准删除）
-  const startIndex = (currentPage - 1) * perPage;
+  // 计算当前页第一条的真实全局索引
+  const startIndex = ((page || currentPage) - 1) * (pageSize || perPage);
 
   els.quotesList.innerHTML = quotes
-    .map(
-      (q, idx) => {
-        const realIndex = startIndex + idx;
-        // 安全转义 content 用于 onclick 属性
-        const safeContent = escapeHtml(q.content).replace(/\'/g, "\\\'").replace(/"/g, "\&quot;");
-        return `
+    .map((q, idx) => {
+      const realIndex = startIndex + idx;
+      // 安全处理：把金句内容用于 confirm 显示，不用于 onclick 属性
+      // 使用 data-* 存真实索引，事件委托绑定删除
+      return `
         <div class="quote-item" data-index="${realIndex}">
             <div class="quote-content">${escapeHtml(q.content)}</div>
             <div class="quote-meta">
                 <div class="quote-tags">
-                    <span class="tag">${escapeHtml(
-                      q.character || "未知角色"
-                    )}</span>
-                    ${
-                      q.source
-                        ? `<span class="tag source">${escapeHtml(
-                            q.source
-                          )}</span>`
-                        : ""
-                    }
+                    <span class="tag">${escapeHtml(q.character || "未知角色")}</span>
+                    ${q.source ? `<span class="tag source">${escapeHtml(q.source)}</span>` : ""}
                 </div>
-                <button class="btn-danger" onclick="handleDelete(${realIndex}, '${safeContent}')">🗑️ 删除</button>
+                <button class="btn-danger" data-delete-index="${realIndex}" data-content="${escapeHtml(q.content)}">🗑️ 删除</button>
             </div>
         </div>
-    `;
-      }
-    )
+      `;
+    })
     .join("");
+
+  // 事件委托绑定删除按钮（避免 onclick 属性中的引号问题）
+  bindDeleteEvents();
+}
+
+// 事件委托绑定删除按钮
+function bindDeleteEvents() {
+  // 先移除旧的事件监听器（通过 cloneNode 实现）
+  const newQuotesList = els.quotesList.cloneNode(true);
+  els.quotesList.parentNode.replaceChild(newQuotesList, els.quotesList);
+  els.quotesList = newQuotesList;
+
+  els.quotesList.addEventListener("click", async (e) => {
+    const btn = e.target.closest("[data-delete-index]");
+    if (!btn) return;
+
+    const index = parseInt(btn.dataset.deleteIndex, 10);
+    const content = btn.dataset.content || "";
+
+    if (
+      !confirm(
+        `确定要删除这条金句吗？\n\n"${content.substring(0, 50)}${content.length > 50 ? "..." : ""}"`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const result = await bridge.apiPost("custom-quotes/delete", {
+        index: index,
+      });
+
+      // 直接使用后端返回的列表 re-render
+      if (result.quotes) {
+        const totalPages = Math.max(1, Math.ceil(result.total / perPage));
+        // 如果删除后当前页超出范围，回到最后一页
+        if (currentPage > totalPages) {
+          currentPage = totalPages;
+        }
+        // 重新加载当前页
+        loadQuotes();
+      } else {
+        loadQuotes();
+      }
+    } catch (err) {
+      alert(`删除失败: ${err.message}`);
+    }
+  });
 }
 
 // 渲染分页
@@ -163,7 +202,7 @@ async function handleAdd() {
   els.btnAdd.textContent = "添加中...";
 
   try {
-    const result = await bridge.apiPost("custom-quotes/add", {
+    await bridge.apiPost("custom-quotes/add", {
       content,
       character,
       source,
@@ -176,55 +215,14 @@ async function handleAdd() {
     els.character.value = "";
     els.source.value = "";
 
-    // 刷新列表（使用后端返回的列表直接 re-render，减少一次请求）
-    if (result.quotes) {
-      allQuotes = result.quotes.slice(0, perPage);
-      renderQuotes(allQuotes);
-      // 更新统计
-      els.statTotal.textContent = result.total || 0;
-    } else {
-      currentPage = 1;
-      loadQuotes();
-    }
+    // 刷新列表
+    currentPage = 1;
+    loadQuotes();
   } catch (err) {
     showMsg("add-msg", `❌ 添加失败: ${err.message}`, "error");
   } finally {
     els.btnAdd.disabled = false;
     els.btnAdd.textContent = "➕ 添加金句";
-  }
-}
-
-// 删除金句 — 改用 index 精准删除（Bug 修复）
-async function handleDelete(index, content) {
-  if (
-    !confirm(
-      `确定要删除这条金句吗？\n\n"${content.substring(0, 50)}${ content.length > 50 ? "..." : "" }"`
-    )
-  ) {
-    return;
-  }
-
-  try {
-    const result = await bridge.apiPost("custom-quotes/delete", {
-      index: index,   // ← 传真实索引，不再传 keyword（修复 Bug）
-    });
-
-    // 直接使用后端返回的列表 re-render，减少一次请求
-    if (result.quotes) {
-      allQuotes = result.quotes.slice((currentPage - 1) * perPage, currentPage * perPage);
-      renderQuotes(allQuotes);
-      // 更新统计
-      els.statTotal.textContent = result.total || 0;
-      // 如果当前页空了，回到上一页
-      if (allQuotes.length === 0 && currentPage > 1) {
-        currentPage--;
-        loadQuotes();
-      }
-    } else {
-      loadQuotes();
-    }
-  } catch (err) {
-    alert(`删除失败: ${err.message}`);
   }
 }
 
@@ -253,6 +251,7 @@ function showMsg(id, text, type) {
 
 // HTML 转义
 function escapeHtml(text) {
+  if (!text) return "";
   const div = document.createElement("div");
   div.textContent = text;
   return div.innerHTML;

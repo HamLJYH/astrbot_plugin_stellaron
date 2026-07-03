@@ -54,8 +54,9 @@
 
 🙏 致谢
 
-- 台词来自游戏《崩坏：星穹铁道》
-- [AstrBot](https://github.com/AstrBot/AstrBot) 本插件所依赖的框架，拥有强大的 agent 能力和丰富的开源生态
+-台词来自游戏[《崩坏：星穹铁道》](https://sr.mihoyo.com/)
+
+-[AstrBot](https://github.com/AstrBot/AstrBot) 本插件所依赖的框架，拥有强大的 agent 能力和丰富的开源生态
 
 ---
 

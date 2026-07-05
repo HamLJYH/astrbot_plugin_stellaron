@@ -58,6 +58,10 @@
 
 -[AstrBot](https://github.com/AstrBot/AstrBot) 本插件所依赖的框架，拥有强大的 agent 能力和丰富的开源生态
 
+ 支持
+
+欢迎提交 Issue 和 Pull Request 来帮助改进本插件。
+
 ---
 
 愿此行，终抵群星。

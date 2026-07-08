@@ -3,5 +3,6 @@ author: HamLJYH
 desc: 崩坏：星穹铁道金句插件，随机输出角色经典台词，支持用户自定义添加
 version: 1.3.0
 astrbot_version: ">=4.26.0"
+short_desc: 崩铁随机金句
 repo: https://github.com/HamLJYH/astrbot_plugin_stellaron
 short_desc: 随机输出崩铁金句，支持自定义添加

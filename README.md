@@ -15,6 +15,13 @@
 1. 将本插件文件夹复制到 AstrBot 的 `data/plugins/` 目录下
 2. 重启 AstrBot 或热重载插件
 
+方式二：
+
+1.下载本仓库 ZIP 压缩包
+2.解压到  AstrBot/data/plugins/  目录下
+3.确保文件夹名为  astrbot_plugin_stellaron 
+4.重启 AstrBot 或执行热重载
+
 ## 指令
 
 | 指令 | 说明 | 示例 |
